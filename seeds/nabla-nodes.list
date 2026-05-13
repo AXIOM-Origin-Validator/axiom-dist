@@ -1,0 +1,17 @@
+# AXIOM Nabla node seed list — bootstrap host:port set for fresh
+# wallet installs. Community-maintained: PR against axiom-dist to
+# add / retire entries. The wallet's NablaPicker discovers more
+# nodes via gossip after the seed set boots it up.
+#
+# Format: host:tcp_port. HTTP port is auto-derived as
+# tcp_port - 1074 (see sdk/src/nabla.rs::derive_http_addr).
+172.20.0.42:7300
+172.20.0.42:7301
+172.20.0.42:7302
+172.20.0.42:7303
+172.20.0.42:7304
+172.20.0.42:7305
+172.20.0.42:7306
+172.20.0.42:7307
+172.20.0.42:7308
+172.20.0.42:7309

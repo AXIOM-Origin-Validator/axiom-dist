@@ -1,0 +1,18 @@
+# AXIOM validator seed list — bootstrap addresses for fresh
+# wallet installs. Community-maintained: PR against axiom-dist to
+# add / retire entries. Wallets fetch this on first launch and
+# discover the rest of the network via gossip.
+#
+# Format: name<TAB>address<TAB>email
+# Address column = validator's SMTP host (currently unused; Kiddo
+# opens SMTP, not the wallet).
+alpha	172.20.0.42	alpha@axiom
+beta	172.20.0.42	beta@axiom
+gamma	172.20.0.42	gamma@axiom
+delta	172.20.0.42	delta@axiom
+epsilon	172.20.0.42	epsilon@axiom
+zeta	172.20.0.42	zeta@axiom
+eta	172.20.0.42	eta@axiom
+theta	172.20.0.42	theta@axiom
+iota	172.20.0.42	iota@axiom
+kappa	172.20.0.42	kappa@axiom
