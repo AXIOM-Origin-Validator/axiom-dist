@@ -12,7 +12,7 @@
 #   ./update.sh --check             # show what would change
 #
 # First-time install:
-#   curl -sL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/master/update.sh -o update.sh
+#   curl -sL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/main/update.sh -o update.sh
 #   chmod +x update.sh
 #   ./update.sh nabla               # or: ./update.sh validator
 # ══════════════════════════════════════════════════════════════

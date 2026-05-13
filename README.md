@@ -6,7 +6,7 @@ Pre-built binaries for the AXIOM network.
 
 ```bash
 # Download the updater
-curl -sL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/master/update.sh -o update.sh
+curl -sL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/main/update.sh -o update.sh
 chmod +x update.sh
 
 # Install Nabla node (lightweight, citizen infrastructure)
