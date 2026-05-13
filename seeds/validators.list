@@ -3,16 +3,24 @@
 # add / retire entries. Wallets fetch this on first launch and
 # discover the rest of the network via gossip.
 #
-# Format: name<TAB>address<TAB>email
+# Format: name<TAB>address<TAB>email<TAB>ed25519_pubkey_hex
+#
 # Address column = validator's SMTP host (currently unused; Kiddo
 # opens SMTP, not the wallet).
-alpha	172.20.0.42	alpha@axiom
-beta	172.20.0.42	beta@axiom
-gamma	172.20.0.42	gamma@axiom
-delta	172.20.0.42	delta@axiom
-epsilon	172.20.0.42	epsilon@axiom
-zeta	172.20.0.42	zeta@axiom
-eta	172.20.0.42	eta@axiom
-theta	172.20.0.42	theta@axiom
-iota	172.20.0.42	iota@axiom
-kappa	172.20.0.42	kappa@axiom
+#
+# Ed25519 pubkey (optional, 64 hex chars / 32 bytes — added
+# 2026-05-13 per AXIOM_DESIGN_PublicMailCarriers.md §3.1).  When
+# present, the SDK derives an X25519 pubkey via to_montgomery()
+# and seals UMP bodies to that key (UmpEnvelope::Encrypted);
+# absent ⇒ Plain.  Validators with no published pubkey continue
+# to work, just unencrypted.
+alpha	172.20.0.42	alpha@axiom	a61dc74c4e6f680817df2d7df4c9c28e36a7ecd5e18d21932e17d89ae4ef853b
+beta	172.20.0.42	beta@axiom	77589adb4c85ca7c18383318905ffc8f6111d5a9864c964405374ffb18f1b86f
+gamma	172.20.0.42	gamma@axiom	4b3325d4cc317e7293350feadddf7755c1e70259fb15dedbedbc483982822f7a
+delta	172.20.0.42	delta@axiom	0f0aba46e08ea1d8c95d7f58824f9db5bd97cfe84c25143c875243f3f67f3a8b
+epsilon	172.20.0.42	epsilon@axiom	c00758ad8d22b4d0bd1d0ce34d95bd37ecc3b65b8a63e780ef403cc9a305fb2c
+zeta	172.20.0.42	zeta@axiom	acd17f5b3cb8bd017648ba3d05948fe1f1f5af085afec2a401624992d109ed6a
+eta	172.20.0.42	eta@axiom	e8b271445b4d92e22242c51265b01197d9af14d878d8ece8ce24ca6647d75364
+theta	172.20.0.42	theta@axiom	039aac93b7c0d7c328522d5de34a3082182b335fb5147077a0adc31f2fe709ce
+iota	172.20.0.42	iota@axiom	e15ff5e9308d63ac465ace9bd791bb6451fd018e0d648c27a2e0077e5a7f659d
+kappa	172.20.0.42	kappa@axiom	d38744e3433c61e420b465e6d834581025260bf4e11034fc6de2203deef38bbc
