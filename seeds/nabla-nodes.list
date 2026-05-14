@@ -3,15 +3,19 @@
 # add / retire entries. The wallet's NablaPicker discovers more
 # nodes via gossip after the seed set boots it up.
 #
-# Format: host:tcp_port. HTTP port is auto-derived as
-# tcp_port - 1074 (see sdk/src/nabla.rs::derive_http_addr).
-172.20.0.42:7300
-172.20.0.42:7301
-172.20.0.42:7302
-172.20.0.42:7303
-172.20.0.42:7304
-172.20.0.42:7305
-172.20.0.42:7306
-172.20.0.42:7307
-172.20.0.42:7308
-172.20.0.42:7309
+# Format (per sdk/core/src/app.rs::parse_nabla_nodes_list, 2026-05-14):
+#   <name><TAB><host:tcp_port>
+# - <name>: operator-chosen UTF-8 (genesis: Greek letters
+#   alpha..kappa; non-genesis: penguin species, free-form).
+# - HTTP port is auto-derived as tcp_port - 1074
+#   (see sdk/src/nabla.rs::derive_http_addr).
+alpha	172.20.0.42:7300
+beta	172.20.0.42:7301
+gamma	172.20.0.42:7302
+delta	172.20.0.42:7303
+epsilon	172.20.0.42:7304
+zeta	172.20.0.42:7305
+eta	172.20.0.42:7306
+theta	172.20.0.42:7307
+iota	172.20.0.42:7308
+kappa	172.20.0.42:7309
