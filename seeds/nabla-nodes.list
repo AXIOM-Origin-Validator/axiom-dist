@@ -6,13 +6,13 @@
 #              the HTTP port is derived as tcp_port - 1074 (sdk/src/nabla.rs).
 #
 # Single source — edit directly, no generator. '#' lines are comments.
-"alpha", "", "TCP:127.0.0.1:7300"
-"beta", "", "TCP:127.0.0.1:7301"
-"gamma", "", "TCP:127.0.0.1:7302"
-"delta", "", "TCP:127.0.0.1:7303"
-"epsilon", "", "TCP:127.0.0.1:7304"
-"zeta", "", "TCP:127.0.0.1:7305"
-"eta", "", "TCP:127.0.0.1:7306"
-"theta", "", "TCP:127.0.0.1:7307"
-"iota", "", "TCP:127.0.0.1:7308"
-"kappa", "", "TCP:127.0.0.1:7309"
+"alpha", "", "TCP:172.20.0.42:7300"
+"beta", "", "TCP:172.20.0.42:7301"
+"gamma", "", "TCP:172.20.0.42:7302"
+"delta", "", "TCP:172.20.0.42:7303"
+"epsilon", "", "TCP:172.20.0.42:7304"
+"zeta", "", "TCP:172.20.0.42:7305"
+"eta", "", "TCP:172.20.0.42:7306"
+"theta", "", "TCP:172.20.0.42:7307"
+"iota", "", "TCP:172.20.0.42:7308"
+"kappa", "", "TCP:172.20.0.42:7309"
