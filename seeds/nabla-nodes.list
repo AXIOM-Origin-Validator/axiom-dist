@@ -1,21 +1,19 @@
-# AXIOM Nabla node seed list — bootstrap host:port set for fresh
-# wallet installs. Community-maintained: PR against axiom-dist to
-# add / retire entries. The wallet's NablaPicker discovers more
-# nodes via gossip after the seed set boots it up.
+# AXIOM Nabla node seed list — bootstrap entries for fresh wallet
+# installs. Community-maintained: PR against axiom-dist to add /
+# retire entries. The wallet's NablaPicker discovers more nodes via
+# gossip after the seed set boots it up.
 #
-# Format (per sdk/core/src/app.rs::parse_nabla_nodes_list, 2026-05-14):
-#   <name><TAB><host:tcp_port>
-# - <name>: operator-chosen UTF-8 (genesis: Greek letters
-#   alpha..kappa; non-genesis: penguin species, free-form).
-# - HTTP port is auto-derived as tcp_port - 1074
-#   (see sdk/src/nabla.rs::derive_http_addr).
-alpha	172.20.0.42:7300
-beta	172.20.0.42:7301
-gamma	172.20.0.42:7302
-delta	172.20.0.42:7303
-epsilon	172.20.0.42:7304
-zeta	172.20.0.42:7305
-eta	172.20.0.42:7306
-theta	172.20.0.42:7307
-iota	172.20.0.42:7308
-kappa	172.20.0.42:7309
+# Format (quoted CSV, 3 fields):
+#   "name", "ed25519 pubkey (64 hex, or empty)", "carriers"
+# A Nabla node is reached over TCP — every line needs a TCP: carrier.
+# HTTP port is auto-derived as tcp_port - 1074 (see sdk/src/nabla.rs).
+"alpha", "", "TCP:172.20.0.42:7300"
+"beta", "", "TCP:172.20.0.42:7301"
+"gamma", "", "TCP:172.20.0.42:7302"
+"delta", "", "TCP:172.20.0.42:7303"
+"epsilon", "", "TCP:172.20.0.42:7304"
+"zeta", "", "TCP:172.20.0.42:7305"
+"eta", "", "TCP:172.20.0.42:7306"
+"theta", "", "TCP:172.20.0.42:7307"
+"iota", "", "TCP:172.20.0.42:7308"
+"kappa", "", "TCP:172.20.0.42:7309"
