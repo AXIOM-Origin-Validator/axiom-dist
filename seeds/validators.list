@@ -1,20 +1,21 @@
-# AXIOM validator seed list — bootstrap entries for fresh wallet
-# installs. Community-maintained: PR against axiom-dist to add /
-# retire entries. Wallets fetch this on first launch and discover
-# the rest of the network via gossip.
+# AXIOM validator seed list — the canonical, hand-edited default.
 #
-# Format (quoted CSV, 3 fields):
-#   "name", "ed25519 pubkey (64 hex, or empty)", "carriers"
-# carriers: comma-separated <scheme>:<addr> (email, TOT, FATMAMA, P2P).
-# An empty pubkey => the wallet ships a Plain (unsealed) UMP; a present
-# key => the UMP body is sealed to it (Ed25519 -> X25519).
-"alpha", "a61dc74c4e6f680817df2d7df4c9c28e36a7ecd5e18d21932e17d89ae4ef853b", "email:alpha@axiom"
-"beta", "77589adb4c85ca7c18383318905ffc8f6111d5a9864c964405374ffb18f1b86f", "email:beta@axiom"
-"gamma", "4b3325d4cc317e7293350feadddf7755c1e70259fb15dedbedbc483982822f7a", "email:gamma@axiom"
-"delta", "0f0aba46e08ea1d8c95d7f58824f9db5bd97cfe84c25143c875243f3f67f3a8b", "email:delta@axiom"
-"epsilon", "c00758ad8d22b4d0bd1d0ce34d95bd37ecc3b65b8a63e780ef403cc9a305fb2c", "email:epsilon@axiom"
-"zeta", "acd17f5b3cb8bd017648ba3d05948fe1f1f5af085afec2a401624992d109ed6a", "email:zeta@axiom"
-"eta", "e8b271445b4d92e22242c51265b01197d9af14d878d8ece8ce24ca6647d75364", "email:eta@axiom"
-"theta", "039aac93b7c0d7c328522d5de34a3082182b335fb5147077a0adc31f2fe709ce", "email:theta@axiom"
-"iota", "e15ff5e9308d63ac465ace9bd791bb6451fd018e0d648c27a2e0077e5a7f659d", "email:iota@axiom"
-"kappa", "d38744e3433c61e420b465e6d834581025260bf4e11034fc6de2203deef38bbc", "email:kappa@axiom"
+# One CSV line per validator:  "name", "ed25519 pubkey (64 hex)", "carriers"
+#   name     — human label.
+#   pubkey   — the validator's Ed25519 identity key. The SDK seals the
+#              outbound UMP to it (Ed25519 -> X25519). Empty -> Plain.
+#   carriers — comma-separated <SCHEME>:<addr>, how to reach the validator.
+#              schemes: email, TOT, FATMAMA, P2P (scheme is case-insensitive).
+#
+# This file is the single source — validators, Nabla, and every client read
+# it. No generator produces it: edit it directly. '#' lines are comments.
+"alpha", "a61dc74c4e6f680817df2d7df4c9c28e36a7ecd5e18d21932e17d89ae4ef853b", "email:alpha@axiom, TOT:127.0.0.1:7400"
+"beta", "77589adb4c85ca7c18383318905ffc8f6111d5a9864c964405374ffb18f1b86f", "email:beta@axiom, TOT:127.0.0.1:7401"
+"gamma", "4b3325d4cc317e7293350feadddf7755c1e70259fb15dedbedbc483982822f7a", "email:gamma@axiom, TOT:127.0.0.1:7402"
+"delta", "0f0aba46e08ea1d8c95d7f58824f9db5bd97cfe84c25143c875243f3f67f3a8b", "email:delta@axiom, TOT:127.0.0.1:7403"
+"epsilon", "c00758ad8d22b4d0bd1d0ce34d95bd37ecc3b65b8a63e780ef403cc9a305fb2c", "email:epsilon@axiom, TOT:127.0.0.1:7404"
+"zeta", "acd17f5b3cb8bd017648ba3d05948fe1f1f5af085afec2a401624992d109ed6a", "email:zeta@axiom, TOT:127.0.0.1:7405"
+"eta", "e8b271445b4d92e22242c51265b01197d9af14d878d8ece8ce24ca6647d75364", "email:eta@axiom, TOT:127.0.0.1:7406"
+"theta", "039aac93b7c0d7c328522d5de34a3082182b335fb5147077a0adc31f2fe709ce", "email:theta@axiom, TOT:127.0.0.1:7407"
+"iota", "e15ff5e9308d63ac465ace9bd791bb6451fd018e0d648c27a2e0077e5a7f659d", "email:iota@axiom, TOT:127.0.0.1:7408"
+"kappa", "d38744e3433c61e420b465e6d834581025260bf4e11034fc6de2203deef38bbc", "email:kappa@axiom, TOT:127.0.0.1:7409"

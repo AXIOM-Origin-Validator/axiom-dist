@@ -1,19 +1,18 @@
-# AXIOM Nabla node seed list — bootstrap entries for fresh wallet
-# installs. Community-maintained: PR against axiom-dist to add /
-# retire entries. The wallet's NablaPicker discovers more nodes via
-# gossip after the seed set boots it up.
+# AXIOM Nabla node seed list — the canonical, hand-edited default.
 #
-# Format (quoted CSV, 3 fields):
-#   "name", "ed25519 pubkey (64 hex, or empty)", "carriers"
-# A Nabla node is reached over TCP — every line needs a TCP: carrier.
-# HTTP port is auto-derived as tcp_port - 1074 (see sdk/src/nabla.rs).
-"alpha", "", "TCP:172.20.0.42:7300"
-"beta", "", "TCP:172.20.0.42:7301"
-"gamma", "", "TCP:172.20.0.42:7302"
-"delta", "", "TCP:172.20.0.42:7303"
-"epsilon", "", "TCP:172.20.0.42:7304"
-"zeta", "", "TCP:172.20.0.42:7305"
-"eta", "", "TCP:172.20.0.42:7306"
-"theta", "", "TCP:172.20.0.42:7307"
-"iota", "", "TCP:172.20.0.42:7308"
-"kappa", "", "TCP:172.20.0.42:7309"
+# Same line format as validators.list:  "name", "ed25519 pubkey (64 hex)", "carriers"
+#   pubkey   — the Nabla node's Ed25519 key; empty if not pinned.
+#   carriers — comma-separated <SCHEME>:<addr>. Nabla is reached over TCP;
+#              the HTTP port is derived as tcp_port - 1074 (sdk/src/nabla.rs).
+#
+# Single source — edit directly, no generator. '#' lines are comments.
+"alpha", "", "TCP:127.0.0.1:7300"
+"beta", "", "TCP:127.0.0.1:7301"
+"gamma", "", "TCP:127.0.0.1:7302"
+"delta", "", "TCP:127.0.0.1:7303"
+"epsilon", "", "TCP:127.0.0.1:7304"
+"zeta", "", "TCP:127.0.0.1:7305"
+"eta", "", "TCP:127.0.0.1:7306"
+"theta", "", "TCP:127.0.0.1:7307"
+"iota", "", "TCP:127.0.0.1:7308"
+"kappa", "", "TCP:127.0.0.1:7309"
