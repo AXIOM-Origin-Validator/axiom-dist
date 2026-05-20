@@ -9,10 +9,10 @@
 #
 # This file is the single source — validators, Nabla, and every client read
 # it. No generator produces it: edit it directly. '#' lines are comments.
-"alpha", "a61dc74c4e6f680817df2d7df4c9c28e36a7ecd5e18d21932e17d89ae4ef853b", "email:alpha@axiom, TOT:172.20.0.42:7400"
+"alpha", "a61dc74c4e6f680817df2d7df4c9c28e36a7ecd5e18d21932e17d89ae4ef853b", "email:alpha@axiom, fatmama://172.20.0.42:2525,  TOT:172.20.0.42:7400"
 "beta", "77589adb4c85ca7c18383318905ffc8f6111d5a9864c964405374ffb18f1b86f", "email:beta@axiom, TOT:172.20.0.42:7401"
-"gamma", "4b3325d4cc317e7293350feadddf7755c1e70259fb15dedbedbc483982822f7a", "email:gamma@axiom, TOT:172.20.0.42:7402"
-"delta", "0f0aba46e08ea1d8c95d7f58824f9db5bd97cfe84c25143c875243f3f67f3a8b", "email:delta@axiom, TOT:172.20.0.42:7403"
+"gamma", "4b3325d4cc317e7293350feadddf7755c1e70259fb15dedbedbc483982822f7a", "email:gamma@axiom, fatmama://172.20.0.42:2525, TOT:172.20.0.42:7402"
+"delta", "0f0aba46e08ea1d8c95d7f58824f9db5bd97cfe84c25143c875243f3f67f3a8b", "email:delta@axiom, fatmama://172.20.0.42:2525, TOT:172.20.0.42:7403"
 "epsilon", "c00758ad8d22b4d0bd1d0ce34d95bd37ecc3b65b8a63e780ef403cc9a305fb2c", "email:epsilon@axiom, TOT:172.20.0.42:7404"
 "zeta", "acd17f5b3cb8bd017648ba3d05948fe1f1f5af085afec2a401624992d109ed6a", "email:zeta@axiom, TOT:172.20.0.42:7405"
 "eta", "e8b271445b4d92e22242c51265b01197d9af14d878d8ece8ce24ca6647d75364", "email:eta@axiom, TOT:172.20.0.42:7406"
