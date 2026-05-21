@@ -6,13 +6,13 @@
 #              the HTTP port is derived as tcp_port - 1074 (sdk/src/nabla.rs).
 #
 # Single source — edit directly, no generator. '#' lines are comments.
-"alpha", "", "TCP:172.20.0.42:7300"
-"beta", "", "TCP:172.20.0.42:7301"
-"gamma", "", "TCP:172.20.0.42:7302"
-"delta", "", "TCP:172.20.0.42:7303"
-"epsilon", "", "TCP:172.20.0.42:7304"
-"zeta", "", "TCP:172.20.0.42:7305"
-"eta", "", "TCP:172.20.0.42:7306"
-"theta", "", "TCP:172.20.0.42:7307"
-"iota", "", "TCP:172.20.0.42:7308"
-"kappa", "", "TCP:172.20.0.42:7309"
+"alpha", "", "TCP:axiom-dev.mooo.com:7300"
+"beta", "", "TCP:axiom-dev.mooo.com:7301"
+"gamma", "", "TCP:axiom-dev.mooo.com:7302"
+"delta", "", "TCP:axiom-dev.mooo.com:7303"
+"epsilon", "", "TCP:axiom-dev.mooo.com:7304"
+"zeta", "", "TCP:axiom-dev.mooo.com:7305"
+"eta", "", "TCP:axiom-dev.mooo.com:7306"
+"theta", "", "TCP:axiom-dev.mooo.com:7307"
+"iota", "", "TCP:axiom-dev.mooo.com:7308"
+"kappa", "", "TCP:axiom-dev.mooo.com:7309"
