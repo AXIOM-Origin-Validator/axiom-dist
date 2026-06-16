@@ -841,7 +841,14 @@ $('r-cheques').addEventListener('click', async e => {
 // Raw banner ping through the /fatmama tunnel — proves browser→TOT→FATMAMA.
 function totFatmamaPing(totHost, idx, timeoutMs=7000) {
   return new Promise((resolve, reject) => {
-    let ws; try { ws = new WebSocket(`ws://${totHost}/fatmama/${idx}`); } catch(e){ reject(e); return; }
+    // On https (hosted Pages) route through the Caddy gateway, mirroring kiddo.js
+    // gwWs — a raw ws:// is browser-blocked. Default the TOT port to 7400 if the
+    // entered host omits it, so /tot/<port> matches the gateway route (not /tot/80).
+    let url = `ws://${totHost}/fatmama/${idx}`;
+    if (typeof location !== 'undefined' && location.protocol === 'https:') {
+      try { const u = new URL(url); if (u.protocol === 'ws:') url = `wss://${u.hostname}/tot/${u.port || '7400'}${u.pathname}${u.search}`; } catch (_) {}
+    }
+    let ws; try { ws = new WebSocket(url); } catch(e){ reject(e); return; }
     ws.binaryType = 'arraybuffer';
     const t = setTimeout(() => { try{ws.close();}catch(_){} reject(new Error('timeout')); }, timeoutMs);
     ws.onmessage = ev => { clearTimeout(t); const s = new TextDecoder().decode(new Uint8Array(ev.data)); try{ws.close();}catch(_){} resolve(s.trim().split('\n')[0]); };
