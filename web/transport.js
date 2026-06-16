@@ -147,16 +147,45 @@ export function makeTotTransport(config) {
 //   validators: [{ email, totWs }]   totWs = "ws://host:port"
 //   nablas:     ["host:port", ...]    (the attested order; index = /nabla/<i>)
 //   nablaTotWs: "ws://host:port"      the TOT that tunnels to those nablas
+// Mixed-content TLS gateway upgrade.
+//
+// Browsers forbid an HTTPS page (e.g. the hosted webclient on GitHub Pages,
+// the only way phone users reach it) from opening insecure ws:// / http://
+// to the env — so every connection is blocked with "TOT ws error … hop 0".
+// When (and ONLY when) we're served over https, route through the env's TLS
+// gateway (Caddy on <host>:443) which terminates TLS and path-proxies back to
+// the plaintext TOT / Nabla ports:
+//   ws://HOST:PORT/REST   -> wss://HOST/tot/PORT/REST   (protocol path)
+//   http://HOST:PORT/REST -> https://HOST/nh/PORT/REST  (dashboard reads only)
+// On file:// or http://localhost the originals are returned unchanged, so the
+// single-file build and local hosting keep working against a plaintext env.
+const TLS_GATEWAY = (typeof location !== 'undefined' && location.protocol === 'https:');
+
+function gwWs(wsUrl) {
+  if (!TLS_GATEWAY || !wsUrl) return wsUrl;
+  try {
+    const u = new URL(wsUrl);
+    if (u.protocol !== 'ws:') return wsUrl;            // already wss:// — leave it
+    return `wss://${u.hostname}/tot/${u.port || '80'}${u.pathname}${u.search}`;
+  } catch (_) { return wsUrl; }
+}
+
+function gwHttpBase(addr) {
+  if (!TLS_GATEWAY) return `http://${addr}`;
+  const [host, port] = addr.split(':');
+  return `https://${host}/nh/${port || '80'}`;
+}
+
 export function totConfigFrom({ validators, nablas, nablaTotWs, fromEmail, messageType, cl1, cl5 }) {
   const intake = new Map(validators.map(v => [v.email, `${v.totWs}/intake`]));
   const nablaIdx = new Map((nablas || []).map((addr, i) => [addr, i]));
   return {
-    intakeWsFor: (email) => intake.get(email),
+    intakeWsFor: (email) => gwWs(intake.get(email)),
     nablaWsFor: (addr) => {
       const i = nablaIdx.get(addr);
-      return i === undefined ? undefined : `${nablaTotWs}/nabla/${i}`;
+      return i === undefined ? undefined : gwWs(`${nablaTotWs}/nabla/${i}`);
     },
-    httpBaseFor: (addr) => `http://${addr}`,
+    httpBaseFor: (addr) => gwHttpBase(addr),
     // Carrier email-wrap context (deliver → ANTIE).
     fromEmail,                          // routes ANTIE's response back
     messageType: messageType || 'witness', // ANTIE dispatch (witness/redeem)
