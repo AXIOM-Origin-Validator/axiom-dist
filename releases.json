@@ -1,21 +1,4 @@
-{
-  "schema": 1,
-  "products": {
-    "axiomwallet": {
-      "version": "2.16.3",
-      "core_id": "8e5da7699b98fd2de7563586665672ff2c6e89831005b8fcada6f14daf6c9869",
-      "dmg": "axiomwallet-8e5da769-2.16.3.dmg",
-      "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/download/clients-8e5da769/axiomwallet-8e5da769-2.16.3.dmg",
-      "sha256": "d327b0afe65738719ddd6b8ec65a3320b977b71b85d84187064fd20e16efd3bf",
-      "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/clients-8e5da769"
-    },
-    "unclesam": {
-      "version": "0.3.0",
-      "core_id": "8e5da7699b98fd2de7563586665672ff2c6e89831005b8fcada6f14daf6c9869",
-      "dmg": "unclesam-8e5da769-0.3.0.dmg",
-      "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/download/clients-8e5da769/unclesam-8e5da769-0.3.0.dmg",
-      "sha256": "90215fbb335f4023ec1fa023a5777cc6e211c3eb08be2d802d1a00c35ce3474f",
-      "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/clients-8e5da769"
-    }
-  }
-}
+{ "schema": 1, "products": {
+  "axiomwallet": { "version": "2.16.4", "core_id": "8e5da7699b98fd2de7563586665672ff2c6e89831005b8fcada6f14daf6c9869", "dmg": "axiomwallet-8e5da769-2.16.4.dmg", "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/download/clients-8e5da769/axiomwallet-8e5da769-2.16.4.dmg", "sha256": "0bfb9701e5c5b9d2e2a02a5795b669436361da481334e244230b742cdabba8f7", "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/clients-8e5da769" },
+  "unclesam": { "version": "0.3.0", "core_id": "8e5da7699b98fd2de7563586665672ff2c6e89831005b8fcada6f14daf6c9869", "dmg": "unclesam-8e5da769-0.3.0.dmg", "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/download/clients-8e5da769/unclesam-8e5da769-0.3.0.dmg", "sha256": "90215fbb335f4023ec1fa023a5777cc6e211c3eb08be2d802d1a00c35ce3474f", "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/clients-8e5da769" }
+} }
