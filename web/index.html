@@ -37,6 +37,12 @@
   #main.busy #r-cheques button {
     opacity:.45; pointer-events:none; filter:grayscale(.4);
   }
+  /* Core-divergence lock — disable every value-moving op while this build's
+     Core differs from the live worldline Core (Same-Core invariant). */
+  #main.corelock #ov-claim, #main.corelock #s-send, #main.corelock #ov-heal,
+  #main.corelock #r-cheques button {
+    opacity:.45; pointer-events:none; filter:grayscale(.4);
+  }
   .row { display:flex; gap:.6rem; align-items:center; }
   .row > * { flex:1; }
   .balance { font-size:2.2rem; font-weight:700; letter-spacing:-.5px; }
@@ -105,6 +111,19 @@
   </header>
 
   <div id="msg" class="card" style="display:none"></div>
+  <!-- Core divergence hard-lock (Same-Core invariant). Shown when this build's
+       baked CoreID differs from the live worldline.json CoreID — value ops are
+       disabled and the user is told to download the current build from GitHub.
+       Best-effort: never shown if worldline.json is unreachable (offline). -->
+  <div id="corelock" class="card" style="display:none;border-color:var(--err)">
+    <div style="display:flex;align-items:center;gap:.45rem;font-weight:700;color:var(--err)">
+      <span>⚠</span><span>Outdated Core — transactions disabled</span>
+    </div>
+    <p class="muted" id="corelock-msg" style="margin:.5rem 0 .7rem"></p>
+    <a id="corelock-dl" href="https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/latest" target="_blank" rel="noopener"
+       style="display:inline-block;text-decoration:none"><button>Download the latest build →</button></a>
+    <p class="muted" style="margin:.6rem 0 0;font-size:.78rem">Why: a wallet on a diverged Core can't transact safely (Same-Core invariant — White Paper / Yellow Paper §16.8.3, §23.10). Receiving the latest build re-aligns you with the network.</p>
+  </div>
   <div id="prog" class="card" style="display:none">
     <div id="prog-title" style="font-weight:700;font-size:1rem;display:flex;align-items:center;gap:.5rem">
       <span class="spin" aria-hidden="true"></span><span id="prog-title-txt">Working…</span>
@@ -152,6 +171,7 @@
     <div class="card">
       <h2 id="ov-name">Overview</h2>
       <div class="balance"><span id="ov-bal">0</span> <small>AXC</small></div>
+      <div class="muted" id="ov-bal-ld" style="margin-top:-.25rem;font-size:.95rem"></div>
       <label>Your address (Standard · k=3)</label>
       <div class="addr-row">
         <span class="addr" id="ov-addr">…</span>
@@ -286,6 +306,14 @@
     </div>
   </div>
 </div>
+<!-- dv-change warning. One overlay reused by the on-load notice (1 button) and
+     the pre-send verify gate (2 buttons). Body is filled by dvCardHTML(). -->
+<div id="dvmodal" style="position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:200;padding:1rem">
+  <div class="card" style="max-width:420px;width:100%;margin:0">
+    <div id="dvmodal-body"></div>
+    <div class="row" id="dvmodal-buttons" style="margin-top:.9rem;gap:.5rem"></div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 <!-- 乖乖 (椰子口味) — axiom-denomination canary; 7 taps on the build chip reveals it -->
 <div class="egg" id="egg"><pre id="egg-art"></pre><div class="flavor">乖乖 · 椰子口味</div><div class="hint">click anywhere to dismiss</div></div>
@@ -295,7 +323,7 @@
 // binding (e.g. an older createWithJsStorage arity) can never be the cause.
 const V = Date.now();
 const _mod = await import('../pkg/axiom_sdk_wasm.js?v=' + V);
-const { setup, getCoreId, Wallet, formatAxc, sdkVersion, atomsPerAxc, kuaikuaiArt } = _mod;
+const { setup, getCoreId, canonicalCoreId, Wallet, formatAxc, formatLdollarShort, sdkVersion, atomsPerAxc, kuaikuaiArt } = _mod;
 const _init = _mod.default;
 // Dev mail transport (TOT→FATMAMA): POP3 pull + XAXIOM-REGISTER over the tunnel.
 const { fatmamaRegister, kiddoReceiveCycle } = await import('./kiddo.js?v=' + V);
@@ -345,9 +373,10 @@ function renderHistory() {
   el.innerHTML = rows.map(r => {
     const when = new Date(Number(r.timestamp) * 1000).toLocaleString();
     const amt = formatAxc(BigInt(r.amount));
+    const amtL = lDollar(r.amount);
     const sign = (r.txType === 'Send' || r.txType === 'Burn') ? '−' : (r.txType === 'Heal' ? '' : '+');
     const who = r.counterparty ? ` · ${r.counterparty}` : '';
-    const head = `<span class="t">${r.txType} ${sign}${amt}</span>` +
+    const head = `<span class="t">${r.txType} ${sign}${amt}${amtL ? ' · ' + amtL : ''}</span>` +
                  `<span class="a" title="${r.txid}">${when}${who}</span>`;
     const fb = r.feeBreakdown || [];
     if (!fb.length) return `<div class="tier">${head}</div>`;
@@ -423,6 +452,125 @@ let wallet = null;
 // discards it; every value-moving op re-prompts via askKey(). This is what
 // stops an unlocked-but-unattended screen from being used to move funds.
 
+// ── L$ digit_version + Core-divergence (worldline.json) ──────────────────
+// digit_version is the Console's *suggested* L$ display exponent (1 AXC =
+// 10^dv L$) — display-only; AXC/atoms are invariant. Read best-effort from
+// worldline.json; the wallet works fully without it (last-known dv from
+// localStorage, else AXC-only). Mirrors the Mac DigitVersionWatcher + the
+// in-app update checker. NEITHER web build auto-updates — the update action
+// is "download the latest from GitHub" (see the #corelock banner).
+const WORLDLINE_URL = 'https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/main/seeds/worldline.json';
+let DV = parseInt(localStorage.getItem('axiom_dv_applied') ?? '0', 10) || 0;
+let DV_STARTED = localStorage.getItem('axiom_dv_started') || '';
+let coreLocked = false;
+let dvNoticeShownThisSession = false;
+// atoms → "100.00 L$" at the active dv ('' on any error → caller omits it).
+function lDollar(atoms) { try { return formatLdollarShort(BigInt(atoms), DV >>> 0); } catch (_) { return ''; } }
+const dvFrom = () => parseInt(localStorage.getItem('axiom_dv_from') ?? '0', 10) || 0;
+const dvSendLeft = () => parseInt(localStorage.getItem('axiom_dv_sendleft') ?? '0', 10) || 0;
+const dvLaunchLeft = () => parseInt(localStorage.getItem('axiom_dv_launchleft') ?? '0', 10) || 0;
+
+// Adopt the suggested dv; on a CHANGE, arm both warning channels (3 sends +
+// 3 on-load notices), exactly like the Mac wallet.
+function applyDv(dv, started) {
+  const clamped = Math.max(0, Math.min(255, dv | 0));
+  if (started) { DV_STARTED = started; localStorage.setItem('axiom_dv_started', started); }
+  const prev = parseInt(localStorage.getItem('axiom_dv_applied') ?? '0', 10) || 0;
+  DV = clamped;
+  localStorage.setItem('axiom_dv_applied', String(clamped));
+  if (clamped !== prev) {
+    localStorage.setItem('axiom_dv_from', String(prev));
+    localStorage.setItem('axiom_dv_to', String(clamped));
+    localStorage.setItem('axiom_dv_sendleft', '3');
+    localStorage.setItem('axiom_dv_launchleft', '3');
+  }
+  if (wallet) { try { renderOverview(); } catch (_) {} }
+  maybeShowDvNotice();
+}
+
+// Shared card markup (mirrors the Mac DvChangeCard): AXC on top (invariant),
+// BEFORE → NOW L$, short explanation, large "in effect since <date>".
+function dvCardHTML(atoms, topLabel, counter) {
+  let beforeL = ''; try { beforeL = formatLdollarShort(BigInt(atoms), dvFrom() >>> 0); } catch (_) {}
+  const nowL = lDollar(atoms), axc = formatAxc(BigInt(atoms));
+  return (
+    `<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.8rem">` +
+      `<span class="warn">⚠</span><b>L$ display unit changed</b>` +
+      `<span class="muted" style="margin-left:auto;font:11px ui-monospace,monospace">${counter}</span></div>` +
+    `<div style="text-align:center;margin-bottom:.7rem">` +
+      `<div class="muted" style="font-size:.68rem;letter-spacing:.06em">${topLabel}</div>` +
+      `<div style="font-size:1.5rem;font-weight:700">${axc}</div>` +
+      `<div class="muted" style="font-size:.68rem">AXC — unchanged</div></div>` +
+    `<div class="row" style="background:rgba(210,153,34,.12);border-radius:9px;padding:.6rem;gap:.4rem">` +
+      `<div style="flex:1;text-align:center"><div class="muted" style="font-size:.68rem">BEFORE</div><div style="font-weight:600">${beforeL}</div></div>` +
+      `<div style="flex:0 0 auto;color:var(--warn);align-self:center">→</div>` +
+      `<div style="flex:1;text-align:center"><div class="warn" style="font-size:.68rem">NOW</div><div style="font-weight:600">${nowL}</div></div></div>` +
+    `<p class="muted" style="margin:.7rem 0 0;text-align:center">Same value, same economics — only the L$ label rescaled. AXC is the real unit; you can ignore L$ and trade in AXC. (White Paper §J.14–J.18)</p>` +
+    (DV_STARTED ? `<div style="text-align:center;margin-top:.55rem"><div class="muted" style="font-size:.68rem;letter-spacing:.06em">IN EFFECT SINCE</div><div style="font-weight:700;font-size:1.05rem">${DV_STARTED}</div></div>` : '')
+  );
+}
+
+// On-load notice (post-unlock; never over the unlock screen) — shows for the
+// next 3 wallet opens after a dv change. One [Got it] counts one.
+function maybeShowDvNotice() {
+  if (dvNoticeShownThisSession || !wallet) return;
+  const left = dvLaunchLeft();
+  if (left <= 0) return;
+  dvNoticeShownThisSession = true;
+  $('dvmodal-body').innerHTML = dvCardHTML(BigInt(atomsPerAxc()), 'EXAMPLE: 1 AXC', `${Math.max(1, 4 - left)}/3`);
+  $('dvmodal-buttons').innerHTML = `<button id="dvmodal-ok" style="flex:1">Got it</button>`;
+  $('dvmodal').style.display = 'flex';
+  $('dvmodal-ok').onclick = () => { localStorage.setItem('axiom_dv_launchleft', String(Math.max(0, left - 1))); $('dvmodal').style.display = 'none'; };
+}
+
+// Pre-send verify gate — resolves true to proceed, false to cancel. Shows
+// THIS send's amount old→new L$ + invariant AXC. Counts one of 3.
+function dvSendGate(amountAtoms) {
+  return new Promise(resolve => {
+    const left = dvSendLeft();
+    if (left <= 0) { resolve(true); return; }
+    $('dvmodal-body').innerHTML = dvCardHTML(BigInt(amountAtoms), 'YOU ARE SENDING', `${Math.max(1, 4 - left)}/3`);
+    $('dvmodal-buttons').innerHTML =
+      `<button id="dvmodal-cancel" class="ghost" style="flex:1">Cancel</button>` +
+      `<button id="dvmodal-ok" style="flex:1">Verify &amp; continue</button>`;
+    $('dvmodal').style.display = 'flex';
+    const done = v => { $('dvmodal').style.display = 'none'; resolve(v); };
+    $('dvmodal-ok').onclick = () => { localStorage.setItem('axiom_dv_sendleft', String(Math.max(0, left - 1))); done(true); };
+    $('dvmodal-cancel').onclick = () => done(false);
+  });
+}
+
+// CoreID Same-Core hard-lock. mine = this build's baked canonicalCoreId();
+// theirs = the live worldline core_id. Mismatch ⇒ disable value ops + show the
+// download-from-GitHub banner. Only called when worldline.json was reachable.
+function applyCoreLock(mine, theirs) {
+  coreLocked = true;
+  // A hosted instance can't be fixed by the visitor — the operator has to
+  // download the latest build and redeploy it. The offline file's holder
+  // downloads it themselves. Same hard-lock; different who-acts wording.
+  const hosted = (location.protocol === 'http:' || location.protocol === 'https:');
+  const pre = `This wallet is outdated — it runs Core ${mine.slice(0,8)}…, but the network is on ${theirs.slice(0,8)}…. Transactions are disabled to protect your funds. `;
+  $('corelock-msg').textContent = pre + (hosted
+    ? `Whoever hosts this page must download the latest build and redeploy it.`
+    : `Download the latest AXIOM web wallet to continue.`);
+  $('corelock').style.display = 'block';
+  $('main').classList.add('corelock');
+}
+const LOCK_MSG = 'Transactions are disabled — your Core is outdated. Download the latest build (see the banner at the top).';
+
+// Best-effort worldline read: adopt the suggested dv + apply the CoreID lock.
+// Failure (offline / unreachable) is silent — the wallet keeps working.
+async function checkWorldline() {
+  let w = null;
+  try { const r = await fetch(WORLDLINE_URL + '?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) w = await r.json(); }
+  catch (_) { return; }
+  if (!w) return;
+  if (typeof w.digit_version === 'number') applyDv(w.digit_version, w.digit_version_started || '');
+  const theirs = String(w.core_id || '').toLowerCase();
+  let mine = ''; try { mine = String(canonicalCoreId() || '').toLowerCase(); } catch (_) {}
+  if (theirs && mine && theirs !== mine) applyCoreLock(mine, theirs);
+}
+
 await _init({ module_or_path: new URL('../pkg/axiom_sdk_wasm_bg.wasm?v=' + V, import.meta.url) });
 console.log('[axiom] wasm module init OK; sdk', sdkVersion());
 setMsg('Ready · sdk ' + sdkVersion() + ' · build ' + V, 'ok');
@@ -490,6 +638,12 @@ try {
   console.warn('[axiom] setup failed (non-fatal)', e);
 }
 
+// Best-effort worldline read (suggested dv + CoreID Same-Core hard-lock).
+// Non-blocking; silently no-ops offline. Runs regardless of setup() outcome —
+// canonicalCoreId() is a baked build constant, available even if the ELF
+// didn't load.
+checkWorldline();
+
 // 乖乖 (椰子口味) — the axiom-denomination canary as an easter egg. 7 taps on
 // the build chip within 2 s reveals the art; click anywhere to dismiss. The art
 // comes straight from the wasm (kuaikuaiArt → axiom_denomination::KUAIKUAI_ART):
@@ -544,6 +698,7 @@ function renderOverview() {
   // serialized balance as a plain JS number. Coerce, or it throws
   // "invalid argument type in toBigInt operation".
   $('ov-bal').textContent = formatAxc(BigInt(info.balance)).replace(' AXC','');
+  { const ld = lDollar(info.balance); $('ov-bal-ld').textContent = ld ? '≈ ' + ld : ''; }
   const byTier = Object.fromEntries(info.addresses); // { Ark, Standard, A+, … }
   $('ov-addr').textContent = byTier['Standard'] || info.address;  // main k=3
   $('ov-ark').textContent = byTier['Ark'] || '(none)';            // special k=0
@@ -569,6 +724,9 @@ function renderOverview() {
   } catch (_) { $('ov-heal-card').style.display = 'none'; }
   show('main');
   tab('overview');
+  // dv-change on-load notice — only reachable once the wallet is open (never
+  // over the unlock screen), mirroring the Mac post-login launch popup.
+  maybeShowDvNotice();
 }
 
 // Dev-account creation passcode — a simple friction gate (not real security;
@@ -685,11 +843,13 @@ $('s-send').onclick = async () => {
   if (!to) { setMsg('Enter a recipient.', 'err'); $('s-to').focus(); return; }
   if (!(amt > 0)) { setMsg('Enter an amount greater than 0.', 'err'); $('s-amt').focus(); return; }
   if (!wallet) return;
+  if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
+  const amountAtoms = BigInt(Math.round(amt * Number(atomsPerAxc())));
+  if (!(await dvSendGate(amountAtoms))) return;     // dv-change verify gate (1/3…3/3)
   if (!(await askKey(`send ${amt} AXC`))) return;   // re-auth gate
   const btn = $('s-send'); btn.disabled = true;
   try {
     const host = ($('c-host')?.value.trim() || 'axiom-dev.mooo.com').replace(/:\d+$/, '');
-    const amountAtoms = BigInt(Math.round(amt * Number(atomsPerAxc())));
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const transport = mkTransport(host, 'witness');
     const params = {
@@ -803,7 +963,7 @@ function renderCheques(pend) {
   const el = $('r-cheques');
   if (!pend || !pend.length) { el.textContent = 'None yet.'; return; }
   el.innerHTML = pend.map(c =>
-    `<div class="tier"><span class="t">${formatAxc(BigInt(c.amount))} · ${c.sender}</span>` +
+    `<div class="tier"><span class="t">${formatAxc(BigInt(c.amount))}${lDollar(c.amount) ? ' · ' + lDollar(c.amount) : ''} · ${c.sender}</span>` +
     `<button class="rdm" data-cheque="${c.chequeId}"${c.ready ? '' : ' disabled'}>${c.ready ? 'Redeem' : 'waiting…'}</button></div>`
   ).join('');
 }
@@ -831,6 +991,7 @@ $('r-refresh').onclick = async () => {
 $('r-cheques').addEventListener('click', async e => {
   const b = e.target.closest('.rdm'); if (!b || b.disabled || !wallet) return;
   const chequeId = b.dataset.cheque;
+  if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
   if (!(await askKey('redeem this cheque'))) return;   // re-auth gate
   b.disabled = true; b.textContent = 'redeeming…'; setMsg('');
   showProg('Redeeming cheque…');
@@ -951,6 +1112,7 @@ async function withReceivePump(host, fn) {
 // k-ready bundle appears, then redeems it.
 $('ov-claim').onclick = async () => {
   if (!wallet) return;
+  if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
   if (!(await askKey('claim dev funds'))) return;   // re-auth gate
   const btn = $('ov-claim'), out = $('c-out');
   const host = ($('c-host').value.trim() || 'axiom-dev.mooo.com').replace(/:\d+$/, '');
@@ -1018,6 +1180,7 @@ $('h-refresh').onclick = () => { renderHistory(); toast('refreshed'); };
 // from wallet state. Witness-typed (goes through handle_witness_request).
 $('ov-heal').onclick = async () => {
   if (!wallet) return;
+  if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
   if (!(await askKey('heal the wallet'))) return;   // re-auth gate
   const btn = $('ov-heal'), out = $('heal-out');
   const host = ($('c-host')?.value.trim() || 'axiom-dev.mooo.com').replace(/:\d+$/, '');

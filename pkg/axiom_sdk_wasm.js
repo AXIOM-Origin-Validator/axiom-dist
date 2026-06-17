@@ -690,6 +690,30 @@ export function formatAxc(atoms) {
 }
 
 /**
+ * Atoms → 2-decimal L$ display for a given digit_version ("100.00 L$").
+ * Money-style: whole amounts drop the decimals, a non-zero amount under
+ * 0.01 L$ renders "< 0.01 L$", truncated (never rounded up). dv is the
+ * Console's *suggested* digit_version (read from worldline.json by the
+ * front-end); AXC/atoms are invariant. Mirrors the Mac FFI
+ * `format_ldollar_short`.
+ * @param {bigint} atoms
+ * @param {number} dv
+ * @returns {string}
+ */
+export function formatLdollarShort(atoms, dv) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.formatLdollarShort(atoms, dv);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * CoreID (BLAKE3 of the loaded ELF) as hex. Errors if `setup()` hasn't run.
  * @returns {string}
  */
@@ -1127,7 +1151,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1149,7 +1173,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1274,8 +1298,8 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 252, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 260, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1319,15 +1343,15 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2) {
-    const ret = wasm.wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
 }
 
-function wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3);
+function wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(arg0, arg1, arg2, arg3) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(arg0, arg1, arg2, arg3);
 }
 
 const WalletFinalization = (typeof FinalizationRegistry === 'undefined')
