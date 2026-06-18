@@ -464,6 +464,12 @@ let DV = parseInt(localStorage.getItem('axiom_dv_applied') ?? '0', 10) || 0;
 let DV_STARTED = localStorage.getItem('axiom_dv_started') || '';
 let coreLocked = false;
 let dvNoticeShownThisSession = false;
+// The CoreID this build actually runs = the loaded ELF's CoreID (setup()'s
+// return). The webclient is a dev WASM build with NO baked canonicalCoreId()
+// (that env is only set for the Mac FFI release), so the loaded ELF CoreID —
+// not canonicalCoreId() — is the authoritative left-hand side of the
+// Same-Core hard-lock comparison.
+let MY_COREID = '';
 // atoms → "100.00 L$" at the active dv ('' on any error → caller omits it).
 function lDollar(atoms) { try { return formatLdollarShort(BigInt(atoms), DV >>> 0); } catch (_) { return ''; } }
 const dvFrom = () => parseInt(localStorage.getItem('axiom_dv_from') ?? '0', 10) || 0;
@@ -567,7 +573,10 @@ async function checkWorldline() {
   if (!w) return;
   if (typeof w.digit_version === 'number') applyDv(w.digit_version, w.digit_version_started || '');
   const theirs = String(w.core_id || '').toLowerCase();
-  let mine = ''; try { mine = String(canonicalCoreId() || '').toLowerCase(); } catch (_) {}
+  // Loaded ELF CoreID is authoritative; canonicalCoreId() is only baked for
+  // the Mac FFI release (empty in this dev WASM build), so it's just a fallback.
+  let mine = String(MY_COREID || '').toLowerCase();
+  if (!mine) { try { mine = String(canonicalCoreId() || '').toLowerCase(); } catch (_) {} }
   if (theirs && mine && theirs !== mine) applyCoreLock(mine, theirs);
 }
 
@@ -627,6 +636,7 @@ async function initClWorker(elf) {
 try {
   const elf = new Uint8Array(await (await fetch('../pkg/axiom-core.elf?v=' + V)).arrayBuffer());
   const coreId = setup(elf);
+  MY_COREID = coreId;   // authoritative CoreID for the Same-Core hard-lock
   $('coreid').textContent = `Core ${coreId.slice(0,8)}… · sdk ${sdkVersion()}`;
   console.log('[axiom] setup OK; CoreID', coreId);
   initClWorker(elf); // move CL1/CL5 off the UI thread (best-effort; falls back in-process)
