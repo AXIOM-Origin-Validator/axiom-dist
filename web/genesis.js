@@ -117,7 +117,30 @@ export async function send(wallet, transport, to, amountAtoms, reference, params
 // state for TX_HEAL). `params` = same shape as send/redeem. Returns the
 // new balance + whether CLARA state was cleared.
 export async function heal(wallet, transport, params, onStep) {
-  const o = await wallet.healFund(transport, params, onStep || null);
+  return await healLike(wallet, 'healFund', 'Heal', 'heal', transport, params, onStep);
+}
+
+// YPX-020 HAL — RE-ANCHOR a healthy wallet whose prior witnesses are
+// unreachable (dead-overlap). halReanchorFund → commitHeal (which stamps the
+// hibernation lock the produced state carries). Records a HalReanchor history
+// row. After this the wallet is HIBERNATING (send/redeem rejected) until
+// halComplete clears it.
+export async function halReanchor(wallet, transport, params, onStep) {
+  return await healLike(wallet, 'halReanchorFund', 'HalReanchor', 'hal-reanchor', transport, params, onStep);
+}
+
+// YPX-020 HAL — COMPLETE the re-anchor and END hibernation. halCompleteFund →
+// commitHeal (which clears the lock to 0). Records a HalComplete history row.
+export async function halComplete(wallet, transport, params, onStep) {
+  return await healLike(wallet, 'halCompleteFund', 'HalComplete', 'hal-complete', transport, params, onStep);
+}
+
+// Shared body for heal / HAL re-anchor / HAL complete — all three are
+// key-proved validator-witnessed self-sends with no counterparty value, the
+// same two-phase (Fund → commitHeal) shape. `fundFn` is the WASM method name,
+// `histType`/`histRef` the History row labels.
+async function healLike(wallet, fundFn, histType, histRef, transport, params, onStep) {
+  const o = await wallet[fundFn](transport, params, onStep || null);
   wallet.commitHeal(
     hexToBytes(o.producedStateIdHex),
     o.newBalance,    // BigInt
@@ -125,15 +148,17 @@ export async function heal(wallet, transport, params, onStep) {
     o.receiptCbor,
     o.factChainCbor,
     o.clearClara,
+    o.hibernationUntil, // YPX-020: re-anchor stamps the lock; heal/complete clear it
   );
-  // Heal is a wallet-internal self-send (no counterparty value transfer) —
-  // record it with amount 0 so the History view renders it as "Heal —".
-  recordHistory(wallet, o.txidHex, 'Heal', 0n, '', 'heal');
+  // Self-send (no counterparty value transfer) — record amount 0 so the
+  // History view renders it as "<label> —".
+  recordHistory(wallet, o.txidHex, histType, 0n, '', histRef);
   return {
     txid: o.txidHex,
     newBalance: o.newBalance,
     registered: o.registered,
     clearClara: o.clearClara,
+    hibernationUntil: o.hibernationUntil,
     balance: wallet.balance,
   };
 }

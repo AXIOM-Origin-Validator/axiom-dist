@@ -30,7 +30,9 @@ self.onmessage = async (e) => {
     if (m.type === 'cl1') {
       proof = cl1Run(m.txJson, m.stateJson, m.prevReceipts || undefined, m.factChain || undefined, m.privateKey, m.now);
     } else if (m.type === 'cl5') {
-      proof = cl5Run(m.receiverPk, m.chequeBundle, BigInt(m.balance), BigInt(m.walletSeq), m.stateId,
+      // YPX-020: current_hibernation is cl5Run's slot 5 (after walletSeq).
+      proof = cl5Run(m.receiverPk, m.chequeBundle, BigInt(m.balance), BigInt(m.walletSeq),
+                     BigInt(m.currentHibernation || 0), m.stateId,
                      m.chequeClaimProof || undefined, m.txidAttestation || undefined, m.privateKey, m.now);
     } else {
       throw new Error('cl-worker: unknown message type ' + m.type);

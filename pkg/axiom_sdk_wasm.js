@@ -159,15 +159,16 @@ export class Wallet {
      * @param {Uint8Array} receipt_cbor
      * @param {Uint8Array} fact_chain_cbor
      * @param {boolean} clear_clara
+     * @param {bigint} hibernation_until
      */
-    commitHeal(produced_state_id, new_balance, new_wallet_seq, receipt_cbor, fact_chain_cbor, clear_clara) {
+    commitHeal(produced_state_id, new_balance, new_wallet_seq, receipt_cbor, fact_chain_cbor, clear_clara, hibernation_until) {
         const ptr0 = passArray8ToWasm0(produced_state_id, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArray8ToWasm0(receipt_cbor, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passArray8ToWasm0(fact_chain_cbor, wasm.__wbindgen_malloc);
         const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wallet_commitHeal(this.__wbg_ptr, ptr0, len0, new_balance, new_wallet_seq, ptr1, len1, ptr2, len2, clear_clara);
+        const ret = wasm.wallet_commitHeal(this.__wbg_ptr, ptr0, len0, new_balance, new_wallet_seq, ptr1, len1, ptr2, len2, clear_clara, hibernation_until);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -280,6 +281,42 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * YPX-020 HAL — COMPLETE the re-anchor and END hibernation. A
+     * `kind=HalComplete` self-send is the ONE tx Core accepts on a
+     * hibernating wallet; its produced state carries `hibernation_until = 0`,
+     * and [`Wallet::commit_heal`] clears the local flag. Client-initiated.
+     * @param {any} transport
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    halCompleteFund(transport, params, progress) {
+        const ret = wasm.wallet_halCompleteFund(this.__wbg_ptr, transport, params, progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * YPX-020 HAL — RE-ANCHOR a healthy wallet whose prior witnesses are
+     * unreachable (dead-overlap). A `kind=HalReanchor` self-send Core CL2
+     * accepts WITHOUT the S-ABR overlap requirement; the produced state
+     * carries a hibernation lock. Two-phase like heal: pass the result to
+     * [`Wallet::commit_heal`] (which stamps `hibernationUntil`). Does NOT
+     * touch CLARA state. Client-initiated only (CLAUDE.md §14).
+     * @param {any} transport
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    halReanchorFund(transport, params, progress) {
+        const ret = wasm.wallet_halReanchorFund(this.__wbg_ptr, transport, params, progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Heal / scar-burn — **heal phase** (async, network). Runs
      * [`HealMachine`]: a `kind=Heal` self-send that re-anchors a poisoned
      * state (TX_HEAL, when `garbage_state_ids` is non-empty) or burns the
@@ -298,6 +335,15 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * YPX-020: current hibernation deadline (`0` = not hibernating). The
+     * webclient gates Send/Redeem and shows the recovery banner on this.
+     * @returns {bigint}
+     */
+    get hibernationUntil() {
+        const ret = wasm.wallet_hibernationUntil(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
     }
     /**
      * Transaction history (newest first). `limit` = 0 for all. Pure local
@@ -642,6 +688,7 @@ export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, c
  * @param {Uint8Array} cheque_bundle
  * @param {bigint} current_balance
  * @param {bigint} wallet_seq
+ * @param {bigint} current_hibernation
  * @param {Uint8Array} state_id
  * @param {Uint8Array | null | undefined} cheque_claim_proof
  * @param {Uint8Array | null | undefined} txid_attestation
@@ -649,7 +696,7 @@ export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, c
  * @param {number} now
  * @returns {Uint8Array}
  */
-export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, state_id, cheque_claim_proof, txid_attestation, client_private_key, now) {
+export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, current_hibernation, state_id, cheque_claim_proof, txid_attestation, client_private_key, now) {
     const ptr0 = passArray8ToWasm0(receiver_pk, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(cheque_bundle, wasm.__wbindgen_malloc);
@@ -662,7 +709,7 @@ export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, 
     var len4 = WASM_VECTOR_LEN;
     const ptr5 = passArray8ToWasm0(client_private_key, wasm.__wbindgen_malloc);
     const len5 = WASM_VECTOR_LEN;
-    const ret = wasm.cl5Run(ptr0, len0, ptr1, len1, current_balance, wallet_seq, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, now);
+    const ret = wasm.cl5Run(ptr0, len0, ptr1, len1, current_balance, wallet_seq, current_hibernation, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, now);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
@@ -1151,7 +1198,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1173,7 +1220,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1298,8 +1345,8 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 260, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 253, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1343,15 +1390,15 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447(arg0, arg1, arg2) {
-    const ret = wasm.wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
 }
 
-function wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(arg0, arg1, arg2, arg3) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(arg0, arg1, arg2, arg3);
+function wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3);
 }
 
 const WalletFinalization = (typeof FinalizationRegistry === 'undefined')

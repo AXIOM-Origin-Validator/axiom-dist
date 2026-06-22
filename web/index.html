@@ -43,6 +43,16 @@
   #main.corelock #r-cheques button {
     opacity:.45; pointer-events:none; filter:grayscale(.4);
   }
+  /* YPX-020 hibernation lock — Core hard-rejects every tx except HAL complete
+     / re-anchor while hibernating, so disable Send / Redeem / Claim / Heal +
+     the re-anchor (only "Finish recovery" stays live). SDK defence-in-depth. */
+  #main.hibernating #ov-claim, #main.hibernating #s-send, #main.hibernating #ov-heal,
+  #main.hibernating #ov-hal-reanchor, #main.hibernating #r-cheques button {
+    opacity:.45; pointer-events:none; filter:grayscale(.4);
+  }
+  .hib-banner { margin-top:.9rem; padding:.7rem .8rem; border:1px solid #5a4; border-radius:10px;
+    background:rgba(90,160,90,.10); }
+  .hib-banner > b { color:#9d6; }
   .row { display:flex; gap:.6rem; align-items:center; }
   .row > * { flex:1; }
   .balance { font-size:2.2rem; font-weight:700; letter-spacing:-.5px; }
@@ -185,6 +195,17 @@
       </div>
       <details style="margin-top:.9rem"><summary>State id</summary>
         <div class="addr" id="ov-state" style="margin-top:.4rem"></div></details>
+      <!-- YPX-020: persistent hibernation banner. While hibernating, Core
+           hard-rejects every tx except HAL complete / re-anchor, so Send /
+           Redeem / Claim / Heal are all disabled (see #main.hibernating). -->
+      <div id="ov-hib-banner" class="hib-banner" style="display:none">
+        <b>🌙 Wallet hibernating (HAL)</b>
+        <div class="muted" id="ov-hib-detail" style="margin:.35rem 0 .6rem">
+          This wallet re-anchored after a dead-overlap recovery. Sends and
+          redeems are paused until you finish recovery.</div>
+        <button id="ov-hib-finish" style="width:100%">Finish recovery (HAL)</button>
+        <pre id="hib-out" class="muted" style="margin:.6rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+      </div>
     </div>
 
     <div class="nav">
@@ -213,6 +234,22 @@
         <p class="muted" id="heal-reason" style="margin:.1rem 0 .7rem">This wallet needs healing.</p>
         <div><button id="ov-heal" style="width:100%">Heal wallet</button></div>
         <pre id="heal-out" class="muted" style="margin:.7rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+      </div>
+      <!-- YPX-020 HAL — dead-overlap recovery. A healthy wallet whose prior
+           witnesses are unreachable can't meet S-ABR overlap; heal() does NOT
+           recover this. A HAL re-anchor is a key-proved, validator-witnessed
+           self-send Core CL2 accepts WITHOUT overlap, then hibernates the
+           wallet until you finish recovery. Manual control — runs the real
+           protocol, not a simulation. -->
+      <div class="card" id="ov-hal-card">
+        <h2>Dead-overlap recovery <span class="badge">HAL · YPX-020</span></h2>
+        <p class="muted" style="margin:.1rem 0 .7rem">If sends keep failing with
+          insufficient witness overlap (your prior validators are offline),
+          re-anchor the wallet. This is the real HAL protocol: a key-proved
+          self-send that re-anchors without overlap, then briefly hibernates
+          the wallet. Finish recovery from the banner above once it converges.</p>
+        <div><button id="ov-hal-reanchor" class="secondary" style="width:100%">Re-anchor wallet (HAL)…</button></div>
+        <pre id="hal-out" class="muted" style="margin:.7rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
       </div>
       <div class="card" id="ov-ark-card">
         <h2>Ark address <span class="badge">offline · k=0</span></h2>
@@ -328,7 +365,7 @@ const _init = _mod.default;
 // Dev mail transport (TOT→FATMAMA): POP3 pull + XAXIOM-REGISTER over the tunnel.
 const { fatmamaRegister, kiddoReceiveCycle } = await import('./kiddo.js?v=' + V);
 // Genesis dev-funds claim + redeem (fund/commit splits) and the TOT transport.
-const { claimGenesis, redeem, send, heal } = await import('./genesis.js?v=' + V);
+const { claimGenesis, redeem, send, heal, halReanchor, halComplete } = await import('./genesis.js?v=' + V);
 const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V);
 
 // ── localStorage-backed Storage (the SDK Storage trait is synchronous;
@@ -363,8 +400,12 @@ function tab(name) {
   }
   if (name==='history' && wallet) renderHistory();
 }
+// Self-send recovery types carry no counterparty value (heal + the two
+// YPX-020 HAL kinds). Friendly labels for the raw TxType debug strings.
+const SELF_RECOVERY_TX = new Set(['Heal', 'HalReanchor', 'HalComplete']);
+const TX_LABEL = { HalReanchor: 'HAL re-anchor', HalComplete: 'HAL complete' };
 // Activity / history — newest first. Send/Burn are outgoing (−), Receive/
-// Redeem/Genesis incoming (+), Heal internal (no counterparty value).
+// Redeem/Genesis incoming (+), Heal + HAL internal (no counterparty value).
 function renderHistory() {
   const el = $('h-list');
   let rows;
@@ -374,9 +415,13 @@ function renderHistory() {
     const when = new Date(Number(r.timestamp) * 1000).toLocaleString();
     const amt = formatAxc(BigInt(r.amount));
     const amtL = lDollar(r.amount);
-    const sign = (r.txType === 'Send' || r.txType === 'Burn') ? '−' : (r.txType === 'Heal' ? '' : '+');
+    const isSelf = SELF_RECOVERY_TX.has(r.txType);
+    const sign = (r.txType === 'Send' || r.txType === 'Burn') ? '−' : (isSelf ? '' : '+');
+    const label = TX_LABEL[r.txType] || r.txType;
     const who = r.counterparty ? ` · ${r.counterparty}` : '';
-    const head = `<span class="t">${r.txType} ${sign}${amt}${amtL ? ' · ' + amtL : ''}</span>` +
+    // Self-recovery rows show no AXC (the "0.00" would be misleading).
+    const valTxt = isSelf ? '· self' : `${sign}${amt}${amtL ? ' · ' + amtL : ''}`;
+    const head = `<span class="t">${label} ${valTxt}</span>` +
                  `<span class="a" title="${r.txid}">${when}${who}</span>`;
     const fb = r.feeBreakdown || [];
     if (!fb.length) return `<div class="tier">${head}</div>`;
@@ -624,8 +669,10 @@ async function initClWorker(elf) {
     // Signatures mirror sdk/wasm/src/transport.rs run_cl1 / run_cl5.
     CL1 = (txJson, stateJson, prevReceipts, factChain, privateKey, now) =>
       clCall('cl1', { txJson, stateJson, prevReceipts, factChain, privateKey, now });
-    CL5 = (receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now) =>
-      clCall('cl5', { receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now });
+    // current_hibernation arrives LAST positionally (transport.rs pushes it
+    // as the trailing arg); the worker re-inserts it into cl5Run's slot 5.
+    CL5 = (receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now, currentHibernation) =>
+      clCall('cl5', { receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now, currentHibernation });
     console.log('[axiom] CL worker ready — signing runs off the UI thread');
   } catch (e) {
     console.warn('[axiom] CL worker unavailable — signing in-process, UI may pause:', e?.message || e);
@@ -732,6 +779,23 @@ function renderOverview() {
     $('ov-heal-card').style.display = actions.length ? '' : 'none';
     if (actions.length) $('heal-reason').textContent = actions.map(a => a.reason).join(' · ');
   } catch (_) { $('ov-heal-card').style.display = 'none'; }
+  // YPX-020: hibernation gate. `hibernationUntil != 0` (a BINARY flag, NOT a
+  // clock — cleared only by HAL complete) → show the persistent banner and
+  // disable every value-moving op except "Finish recovery". The on-screen
+  // estimate is UX only; the real gate is Core's binary flag.
+  try {
+    const hib = Number(wallet.hibernationUntil || 0n);
+    const hibernating = hib !== 0;
+    $('main').classList.toggle('hibernating', hibernating);
+    $('ov-hib-banner').style.display = hibernating ? '' : 'none';
+    if (hibernating) {
+      const nowS = Math.floor(Date.now() / 1000);
+      const left = hib - nowS;
+      $('ov-hib-detail').textContent = left > 0
+        ? `This wallet re-anchored after a dead-overlap recovery. Sends and redeems are paused — convergence window ~${left}s. You can finish recovery once it passes.`
+        : 'This wallet re-anchored after a dead-overlap recovery. The convergence window has passed — finishing recovery is likely ready now.';
+    }
+  } catch (_) { $('main').classList.remove('hibernating'); $('ov-hib-banner').style.display = 'none'; }
   show('main');
   tab('overview');
   // dv-change on-load notice — only reachable once the wallet is open (never
@@ -1212,6 +1276,36 @@ $('ov-heal').onclick = async () => {
     btn.disabled = false; hideProg();
   }
 };
+// YPX-020 HAL — re-anchor (dead-overlap recovery) + finish recovery. Same
+// witness-typed self-send shape as heal; the WASM fund fn picks the kind.
+// Re-anchor hibernates the wallet; complete clears it. Runs the real
+// protocol against the live env — not a simulation.
+async function runHalOp(opFn, label, btn, out, verb) {
+  if (!wallet) return;
+  if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
+  if (!(await askKey(verb))) return;   // re-auth gate
+  const host = ($('c-host')?.value.trim() || 'axiom-dev.mooo.com').replace(/:\d+$/, '');
+  btn.disabled = true; out.textContent = ''; setMsg(''); showProg(label + '…');
+  try {
+    const maildir = `${PARENT}/${wallet.info().name}/maildir`;
+    const params = {
+      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      k: 3, inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
+      pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
+    };
+    const r = await withReceivePump(host, () => opFn(wallet, mkTransport(host, 'witness'), params, stepProgress(label)));
+    renderOverview();
+    setMsg(`${label} done · balance ${formatAxc(BigInt(r.newBalance))}`, 'ok');
+  } catch (e) {
+    out.innerHTML = `<span class="err">${errOf(e)}</span>`;
+    setMsg(`${label} failed — ` + errOf(e), 'err');
+  } finally {
+    btn.disabled = false; hideProg();
+  }
+}
+$('ov-hal-reanchor').onclick = () => runHalOp(halReanchor, 'Re-anchor (HAL)', $('ov-hal-reanchor'), $('hal-out'), 're-anchor the wallet (HAL)');
+$('ov-hib-finish').onclick  = () => runHalOp(halComplete, 'Finish recovery', $('ov-hib-finish'), $('hib-out'), 'finish HAL recovery');
+
 $('ov-lock').onclick = () => { try { wallet?.close(); } catch(_){} wallet=null; location.reload(); };
 </script>
 </body>
