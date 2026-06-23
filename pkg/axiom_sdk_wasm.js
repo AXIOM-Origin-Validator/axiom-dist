@@ -117,6 +117,22 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * YPX-020 §2: clear the local hibernation flag after the completion redeem.
+     * Core's CL5 zeroes `hibernation_until` on the distress-cheque self-redeem
+     * (the witnessed receipt carries hibernation=0), but `commitRedeem` /
+     * `commit_protocol_transition` don't touch the local flag — so the webclient
+     * mirrors the clear here, exactly like native `heal::hal_complete`. Without
+     * it the wallet stays locally "hibernating" and the next send's §15 anchor
+     * recomputes a state_hash that won't match the hibernation=0 receipt
+     * (E_STATE_NOT_ANCHORED).
+     */
+    clearHibernation() {
+        const ret = wasm.wallet_clearHibernation(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Persist and release the lock. The handle becomes unusable afterwards.
      */
     close() {
@@ -275,23 +291,6 @@ export class Wallet {
      */
     diagnose() {
         const ret = wasm.wallet_diagnose(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * YPX-020 HAL — COMPLETE the re-anchor and END hibernation. A
-     * `kind=HalComplete` self-send is the ONE tx Core accepts on a
-     * hibernating wallet; its produced state carries `hibernation_until = 0`,
-     * and [`Wallet::commit_heal`] clears the local flag. Client-initiated.
-     * @param {any} transport
-     * @param {any} params
-     * @param {any} progress
-     * @returns {Promise<any>}
-     */
-    halCompleteFund(transport, params, progress) {
-        const ret = wasm.wallet_halCompleteFund(this.__wbg_ptr, transport, params, progress);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }

@@ -402,8 +402,9 @@ function tab(name) {
 }
 // Self-send recovery types carry no counterparty value (heal + the two
 // YPX-020 HAL kinds). Friendly labels for the raw TxType debug strings.
-const SELF_RECOVERY_TX = new Set(['Heal', 'HalReanchor', 'HalComplete']);
-const TX_LABEL = { HalReanchor: 'HAL re-anchor', HalComplete: 'HAL complete' };
+// §2: completion is a Redeem (no HalComplete history row).
+const SELF_RECOVERY_TX = new Set(['Heal', 'HalReanchor']);
+const TX_LABEL = { HalReanchor: 'HAL re-anchor' };
 // Activity / history — newest first. Send/Burn are outgoing (−), Receive/
 // Redeem/Genesis incoming (+), Heal + HAL internal (no counterparty value).
 function renderHistory() {

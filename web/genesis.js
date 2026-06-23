@@ -129,16 +129,43 @@ export async function halReanchor(wallet, transport, params, onStep) {
   return await healLike(wallet, 'halReanchorFund', 'HalReanchor', 'hal-reanchor', transport, params, onStep);
 }
 
-// YPX-020 HAL — COMPLETE the re-anchor and END hibernation. halCompleteFund →
-// commitHeal (which clears the lock to 0). Records a HalComplete history row.
+// YPX-020 §2 HAL — COMPLETE recovery by REDEEMING the re-anchor's distress
+// (dust self-) cheque. There is no halCompleteFund / separate completion
+// self-send anymore: the redeem IS the completion. Core's CL5 zeroes
+// hibernation_until in the witnessed receipt; commitRedeem doesn't touch the
+// local flag, so we mirror the clear via wallet.clearHibernation(). The distress
+// cheque lands in the inbox via the receive pump the caller runs — poll recv
+// until it's ready, then redeem it (records ONE dust Redeem row, not a
+// "HAL complete" row).
 export async function halComplete(wallet, transport, params, onStep) {
-  return await healLike(wallet, 'halCompleteFund', 'HalComplete', 'hal-complete', transport, params, onStep);
+  const maildir = (params.inboxNew || '').replace(/\/inbox\/new$/, '');
+  const ownAddr = wallet.info().address;
+  let chequeId = null;
+  const rounds = params.pollMaxRounds || 720;
+  for (let i = 0; i < rounds && !chequeId; i++) {
+    if (onStep) onStep('recv');
+    const cheques = wallet.recv(maildir) || [];
+    // The distress cheque is a ready SELF-cheque (sender == this wallet);
+    // fall back to any ready bundle if the address compare is finicky.
+    const distress = cheques.find(c => c.ready && c.sender === ownAddr)
+                  || cheques.find(c => c.ready);
+    if (distress) { chequeId = distress.chequeId; break; }
+    await sleep(params.pollIntervalMs || 250);
+  }
+  if (!chequeId) {
+    throw new Error('Finish recovery: no distress cheque ready yet — re-anchor first, then wait for its dust cheque to arrive.');
+  }
+  const r = await redeem(wallet, transport, chequeId, params, onStep);
+  wallet.clearHibernation();   // §2: mirror CL5's hibernation clear locally
+  return { ...r, hibernationUntil: 0 };
 }
 
-// Shared body for heal / HAL re-anchor / HAL complete — all three are
-// key-proved validator-witnessed self-sends with no counterparty value, the
-// same two-phase (Fund → commitHeal) shape. `fundFn` is the WASM method name,
-// `histType`/`histRef` the History row labels.
+function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+// Shared body for heal / HAL re-anchor — both are key-proved validator-
+// witnessed self-sends with no counterparty value, the same Fund → commitHeal
+// shape. (HAL completion is NOT here — §2 makes it a redeem; see halComplete.)
+// `fundFn` is the WASM method name, `histType`/`histRef` the History row labels.
 async function healLike(wallet, fundFn, histType, histRef, transport, params, onStep) {
   const o = await wallet[fundFn](transport, params, onStep || null);
   wallet.commitHeal(
