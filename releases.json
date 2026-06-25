@@ -18,11 +18,11 @@
       "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/clients-ff15b5db-2.16.6"
     },
     "webclient": {
-      "version": "3.2.2",
+      "version": "3.2.3",
       "core_id": "5564323f0bae46618a28d651ffae7c649f4eeb343ed5ff609814f34698d82dd5",
       "url": "https://axiom-origin-validator.github.io/axiom-dist/",
-      "html_sha256": "2c2ba320001777f1835c25d24c9876e830a3c79fa07050762481879de2138b1d",
-      "zip_sha256": "b1b920f28c569b52e40d26d7a9aa2893077a2b483bffba2aac75ac2ad62014af",
+      "html_sha256": "efe7c4b01ca11964dc5ab283146ce50c4937caf6a9c8ad06891cc8f914ed1882",
+      "zip_sha256": "e514d5d51f585aa25ca2cd1e9e99ed84a2a805205e0c6ad1bc1eb0984ee1a6a6",
       "optional": true
     }
   }
