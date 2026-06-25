@@ -16,7 +16,9 @@
       "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/download/clients-ff15b5db-2.16.6/unclesam-ff15b5db-0.3.1.dmg",
       "sha256": "7e50115ad7d5309616aad1302a91a2992d68718773b69d075ea8d4bb559ad2cd",
       "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/clients-ff15b5db-2.16.6"
-    },
+    }
+  },
+  "web": {
     "webclient": {
       "version": "3.2.3",
       "core_id": "5564323f0bae46618a28d651ffae7c649f4eeb343ed5ff609814f34698d82dd5",
