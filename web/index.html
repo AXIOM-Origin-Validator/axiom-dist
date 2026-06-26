@@ -468,21 +468,34 @@ const setMsg = (text, cls='err') => { const m=$('msg'); m.textContent=text; m.cl
 // value-moving op. The key is NEVER stored — verified here and discarded — so
 // an unlocked-but-unattended screen can't send/redeem/heal/claim. Resolves
 // true on a correct key, false on cancel/empty.
-function askKey(action) {
+// `action` is the verb string for the default title/message (e.g. "send 5 AXC").
+// `opts` (optional) overrides for non-default flows like Forget, which has its
+// own warning copy and verifies against a wallet that isn't the open `wallet`:
+//   opts.title  — overrides the title line
+//   opts.msg    — overrides the body line (e.g. the destructive-wipe warning)
+//   opts.okLabel— overrides the confirm-button label (default "Authorize")
+//   opts.verify — pw => bool; defaults to the OPEN wallet's verifyKey. Forget
+//                 from the unlock screen passes one that opens-verifies-closes
+//                 the target wallet, so the key is checked WITHOUT being shown.
+// The input is a masked type="password" (NEVER a native prompt(), which renders
+// the secret in cleartext); the key is verified here and discarded, never cached.
+function askKey(action, opts={}) {
+  const check = opts.verify || (pw => wallet.verifyKey(pw));
   return new Promise(resolve => {
-    const gate=$('keygate'), input=$('keygate-input'), err=$('keygate-err');
-    $('keygate-title').textContent = action[0].toUpperCase()+action.slice(1);
-    $('keygate-msg').textContent = `Enter your wallet key to authorize this ${action}.`;
+    const gate=$('keygate'), input=$('keygate-input'), err=$('keygate-err'), ok=$('keygate-ok');
+    $('keygate-title').textContent = opts.title || (action[0].toUpperCase()+action.slice(1));
+    $('keygate-msg').textContent = opts.msg || `Enter your wallet key to authorize this ${action}.`;
+    ok.textContent = opts.okLabel || 'Authorize';
     input.value=''; err.style.display='none';
     gate.style.display='flex'; setTimeout(()=>input.focus(),0);
-    const done = v => { gate.style.display='none'; $('keygate-ok').onclick=null; $('keygate-cancel').onclick=null; input.onkeydown=null; resolve(v); };
+    const done = v => { gate.style.display='none'; ok.onclick=null; $('keygate-cancel').onclick=null; input.onkeydown=null; ok.textContent='Authorize'; resolve(v); };
     const submit = () => {
       const pw = input.value;
       if (!pw) { err.textContent='Enter your wallet key.'; err.style.display='block'; return; }
-      if (!wallet.verifyKey(pw)) { err.textContent='Wrong wallet key.'; err.style.display='block'; input.value=''; input.focus(); return; }
+      if (!check(pw)) { err.textContent='Wrong wallet key.'; err.style.display='block'; input.value=''; input.focus(); return; }
       done(true);
     };
-    $('keygate-ok').onclick = submit;
+    ok.onclick = submit;
     $('keygate-cancel').onclick = () => done(false);
     input.onkeydown = e => { if (e.key==='Enter') submit(); else if (e.key==='Escape') done(false); };
   });
@@ -865,35 +878,41 @@ function forgetWallet(name) {
   if (localStorage.getItem('axiom_last_wallet') === name) localStorage.removeItem('axiom_last_wallet');
 }
 // Forget is destructive, so it requires the wallet key (verifyKey) — a
-// confirm() click alone shouldn't be able to wipe a wallet. Returns the
-// typed key on success, null on cancel/empty/wrong-key (caller aborts).
-const PROMPT = name => prompt(
-  `Forget "${name}"?\n\nThis PERMANENTLY removes it from this browser. ` +
-  `Make sure you have your wallet key + a backup.\n\nEnter your wallet key to confirm:`);
-$('u-forget').onclick = () => {
+// confirm() click alone shouldn't be able to wipe a wallet. It routes through
+// askKey()'s MASKED keygate overlay (never a native prompt(), which would show
+// the secret key in cleartext), with the destructive-wipe warning as the body.
+const forgetWarn = name =>
+  `This PERMANENTLY removes "${name}" from this browser. Make sure you have your ` +
+  `wallet key + a backup. Enter your wallet key to confirm.`;
+$('u-forget').onclick = async () => {
   const name = $('u-wallet').value;
   if (!name) return;
-  const pw = PROMPT(name);
-  if (pw === null || pw === '') return;          // cancelled / empty
-  // Wallet isn't open on the unlock screen — open it just to verify the
-  // key (same path as u-open), then close + wipe.
-  let w;
-  try { w = Wallet.openWithJsStorage(`${PARENT}/${name}`, storage); }
-  catch (e) { setMsg('Forget failed — could not open wallet: ' + errOf(e), 'err'); return; }
-  const ok = w.verifyKey(pw);
-  try { w.close(); } catch(_){}
-  if (!ok) { setMsg('Wrong wallet key — not forgotten.', 'err'); $('u-key').focus(); return; }
+  // Wallet isn't open on the unlock screen — verify by opening it just long
+  // enough to check the key (same path as u-open), then close. The key stays
+  // inside the gate (masked) and is never shown or cached.
+  const ok = await askKey('forget', {
+    title: `Forget "${name}"`, msg: forgetWarn(name), okLabel: 'Forget',
+    verify: pw => {
+      let w;
+      try { w = Wallet.openWithJsStorage(`${PARENT}/${name}`, storage); }
+      catch (e) { setMsg('Forget failed — could not open wallet: ' + errOf(e), 'err'); return false; }
+      const good = w.verifyKey(pw);
+      try { w.close(); } catch(_){}
+      return good;
+    }
+  });
+  if (!ok) return;                               // cancelled / wrong key (gate showed it)
   forgetWallet(name);
   if (refreshWalletPicker().length === 0) show('onboard'); else show('unlock');
 };
 // Forget the wallet you're currently in (Overview). Verify the key on the
-// open wallet, then close + wipe + reload back to unlock/onboard.
-$('ov-forget').onclick = () => {
+// open wallet (default verifier), then close + wipe + reload.
+$('ov-forget').onclick = async () => {
   const name = wallet?.info()?.name;
   if (!name) return;
-  const pw = PROMPT(name);
-  if (pw === null || pw === '') return;          // cancelled / empty
-  if (!wallet.verifyKey(pw)) { toast('Wrong wallet key — not forgotten'); return; }
+  const ok = await askKey('forget', {
+    title: `Forget "${name}"`, msg: forgetWarn(name), okLabel: 'Forget' });
+  if (!ok) return;                               // cancelled / wrong key (gate showed it)
   try { wallet?.close(); } catch(_){} wallet=null;
   forgetWallet(name);
   location.reload();
