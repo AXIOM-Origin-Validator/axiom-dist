@@ -1056,10 +1056,14 @@ function recvParams() {
 function renderCheques(pend) {
   const el = $('r-cheques');
   if (!pend || !pend.length) { el.textContent = 'None yet.'; return; }
-  el.innerHTML = pend.map(c =>
-    `<div class="tier"><span class="t">${formatAxc(BigInt(c.amount))}${lDollar(c.amount) ? ' · ' + lDollar(c.amount) : ''} · ${c.sender}</span>` +
-    `<button class="rdm" data-cheque="${c.chequeId}"${c.ready ? '' : ' disabled'}>${c.ready ? 'Redeem' : 'waiting…'}</button></div>`
-  ).join('');
+  el.innerHTML = pend.map(c => {
+    // The genesis/airdrop cheque is a self-send of 1 AXC — label it as the
+    // airdrop instead of showing the wallet's own address as the "sender".
+    const amt = `${formatAxc(BigInt(c.amount))}${lDollar(c.amount) ? ' · ' + lDollar(c.amount) : ''}`;
+    const who = c.isGenesisAirdrop ? '1 AXC airdrop' : c.sender;
+    return `<div class="tier"><span class="t">${amt} · ${who}</span>` +
+      `<button class="rdm" data-cheque="${c.chequeId}"${c.ready ? '' : ' disabled'}>${c.ready ? 'Redeem' : 'waiting…'}</button></div>`;
+  }).join('');
 }
 async function receiveCycle() {
   const host = recvHost();
