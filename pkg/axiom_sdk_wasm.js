@@ -84,6 +84,44 @@ export class Wallet {
         return BigInt.asUintN(64, ret[0]);
     }
     /**
+     * Explicit scar-burn — the de-orchestrated counterpart `heal` no longer
+     * does implicitly. Burns ONE scarred FACT link per call (a kind=Heal
+     * self-send to BURN with `burn_target` set; value is DESTROYED). The
+     * webclient surfaces this as a deliberate, user-confirmed action; re-call
+     * while scars remain. Two-phase like heal: pass the outcome to
+     * [`Wallet::commit_heal`] with `clear_clara=false`. Client-initiated only.
+     * @param {any} transport
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    burnScarsFund(transport, params, progress) {
+        const ret = wasm.wallet_burnScarsFund(this.__wbg_ptr, transport, params, progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * KI#34 WI2/WI5 — the sender's designated Nabla `nabla_hint` address for a
+     * pending cheque (`null` if none). The webclient's incoming-payment-check
+     * selector uses it: "Default" consults this node first; "Secure"/"Random"
+     * ignore it so a malicious sender can't steer the check to its own Nabla.
+     * @param {string} cheque_id
+     * @returns {string | undefined}
+     */
+    chequeNablaHint(cheque_id) {
+        const ptr0 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_chequeNablaHint(this.__wbg_ptr, ptr0, len0);
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getStringFromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
      * Genesis dev-funds claim — **fund phase** (async, network).
      *
      * Runs [`GenesisClaimMachine`]: builds a `kind=GenesisClaim` self-send,

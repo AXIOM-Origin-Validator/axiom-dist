@@ -233,6 +233,9 @@
         <h2>Wallet recovery <span class="badge">heal</span></h2>
         <p class="muted" id="heal-reason" style="margin:.1rem 0 .7rem">This wallet needs healing.</p>
         <div><button id="ov-heal" style="width:100%">Heal wallet</button></div>
+        <!-- Explicit scar-burn (de-orch: heal no longer auto-burns). Burning
+             DESTROYS the scarred value — user-confirmed, separate from heal. -->
+        <div style="margin-top:.5rem"><button id="ov-burn" class="ghost" style="width:100%; color:var(--bad,#d66)">Burn scarred links (destroys value)</button></div>
         <pre id="heal-out" class="muted" style="margin:.7rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
       </div>
       <!-- YPX-020 HAL — dead-overlap recovery. A healthy wallet whose prior
@@ -282,6 +285,17 @@
       <div class="card">
         <h2>Pending cheques</h2>
         <p class="muted" style="margin:.1rem 0 .7rem">Someone paid you a cheque? Pull it in, then redeem. Your address is on the Overview.</p>
+        <!-- KI#34 WI2/WI5 — per-wallet incoming-payment check mode. Which Nablas
+             verify a cheque you redeem is your choice; a double-spend is always
+             caught with no harm to the economy, only this wallet could briefly
+             accept a bad cheque. -->
+        <label class="muted" style="display:block; margin:.1rem 0 .2rem; font-size:11px">Incoming payment checks</label>
+        <select id="r-check-mode" style="width:100%; margin-bottom:.5rem">
+          <option value="default">Default — sender's suggestion + 2 random (fast)</option>
+          <option value="secure">Secure — your own nodes only, ignore sender (cautious)</option>
+          <option value="random">Random — 3 random nodes</option>
+        </select>
+        <div id="r-check-mode-note" class="muted" style="font-size:10px; margin:-.2rem 0 .6rem"></div>
         <div style="margin-top:.2rem"><button id="r-refresh" style="width:100%">Check for cheques</button></div>
         <div id="r-cheques" class="muted" style="margin-top:.7rem">None yet.</div>
       </div>
@@ -365,7 +379,7 @@ const _init = _mod.default;
 // Dev mail transport (TOT→FATMAMA): POP3 pull + XAXIOM-REGISTER over the tunnel.
 const { fatmamaRegister, kiddoReceiveCycle } = await import('./kiddo.js?v=' + V);
 // Genesis dev-funds claim + redeem (fund/commit splits) and the TOT transport.
-const { claimGenesis, redeem, send, heal, halReanchor, halComplete } = await import('./genesis.js?v=' + V);
+const { claimGenesis, redeem, send, heal, burnScars, halReanchor, halComplete } = await import('./genesis.js?v=' + V);
 const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V);
 
 // ── localStorage-backed Storage (the SDK Storage trait is synchronous;
@@ -810,6 +824,7 @@ function renderOverview() {
         : 'This wallet re-anchored after a dead-overlap recovery. The convergence window has passed — finishing recovery is likely ready now.';
     }
   } catch (_) { $('main').classList.remove('hibernating'); $('ov-hib-banner').style.display = 'none'; }
+  syncCheckModePicker();   // KI#34 WI2/WI5 — reflect this wallet's stored check mode
   show('main');
   tab('overview');
   // dv-change on-load notice — only reachable once the wallet is open (never
@@ -1053,6 +1068,52 @@ function recvParams() {
     pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
   };
 }
+
+// ── KI#34 WI2/WI5 — per-wallet incoming-payment-check (Nabla selection) mode ──
+// Mirrors the macApp / native NablaSelectionMode. Which Nablas verify a cheque
+// you redeem is a per-wallet receiver CHOICE (a double-spend is always caught
+// with zero economic damage; only this wallet could briefly accept bad money).
+// Persisted per wallet in localStorage. Default mirrors the macApp default.
+const CHECK_MODE_KEY = a => `axiom_nabla_mode.${a}`;
+function getCheckMode() {
+  try { const a = wallet?.info().address; return (a && localStorage.getItem(CHECK_MODE_KEY(a))) || 'default'; }
+  catch (_) { return 'default'; }
+}
+function setCheckMode(m) {
+  try { const a = wallet?.info().address; if (a) localStorage.setItem(CHECK_MODE_KEY(a), m); } catch (_) {}
+}
+const CHECK_MODE_NOTE = {
+  default: '1 from the sender’s suggestion + 2 random. Fast — fine for everyday wallets.',
+  secure:  'Your own nodes only; the sender’s suggestion is ignored so it can’t steer the check. Best for important wallets.',
+  random:  '3 fully random nodes — trust nothing the sender supplied.',
+};
+// Build the Nabla address list for a redeem per the chosen mode. `hint` is the
+// cheque's sender nabla_hint address (or null). Default puts the hint first then
+// fills with own nodes; Secure/Random ignore the hint entirely.
+function selectNablas(mode, hint) {
+  const k = 3;
+  const pool = NABLAS.slice();
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  if (mode === 'secure') return pool.filter(a => a !== hint).slice(0, k);
+  if (mode === 'random') return pool.slice(0, k);
+  // default: sender hint first (if any), then own nodes, no duplicate
+  const out = hint ? [hint] : [];
+  for (const a of pool) { if (out.length >= k) break; if (a !== hint) out.push(a); }
+  return out.length ? out : pool.slice(0, k);
+}
+// Reflect the stored mode into the picker (call when a wallet opens / renders).
+function syncCheckModePicker() {
+  const sel = $('r-check-mode'); if (!sel) return;
+  const m = getCheckMode();
+  sel.value = m;
+  const note = $('r-check-mode-note'); if (note) note.textContent = CHECK_MODE_NOTE[m] || '';
+}
+if ($('r-check-mode')) {
+  $('r-check-mode').onchange = e => {
+    setCheckMode(e.target.value);
+    const note = $('r-check-mode-note'); if (note) note.textContent = CHECK_MODE_NOTE[e.target.value] || '';
+  };
+}
 function renderCheques(pend) {
   const el = $('r-cheques');
   if (!pend || !pend.length) { el.textContent = 'None yet.'; return; }
@@ -1095,7 +1156,13 @@ $('r-cheques').addEventListener('click', async e => {
   showProg('Redeeming cheque…');
   const rhost = recvHost();
   try {
-    const r = await withReceivePump(rhost, () => redeem(wallet, mkTransport(rhost, 'redeem'), chequeId, recvParams(), stepProgress('Redeem')));
+    // KI#34 WI2/WI5 — pick which Nablas verify this cheque per the wallet's
+    // chosen mode. Default consults the sender's hint first; Secure/Random
+    // ignore it (sender can't steer the check to its own fake Nabla).
+    const params = recvParams();
+    const hint = wallet.chequeNablaHint(chequeId) || null;
+    params.nablaTcpAddresses = selectNablas(getCheckMode(), hint);
+    const r = await withReceivePump(rhost, () => redeem(wallet, mkTransport(rhost, 'redeem'), chequeId, params, stepProgress('Redeem')));
     renderOverview();
     setMsg(`Redeemed ${chequeId} · balance ${formatAxc(BigInt(r.newBalance))}`, 'ok');
     await receiveCycle();
@@ -1296,6 +1363,38 @@ $('ov-heal').onclick = async () => {
   } catch (e) {
     out.innerHTML = `<span class="err">${errOf(e)}</span>`;
     setMsg('Heal failed — ' + errOf(e), 'err');
+  } finally {
+    btn.disabled = false; hideProg();
+  }
+};
+// Explicit scar-burn (de-orch: heal no longer auto-burns). Burning DESTROYS
+// the value locked in a scarred FACT link, so it's a deliberate, user-confirmed
+// action — the masked keygate carries the destructive warning + re-auth. Burns
+// ONE scar per run; re-run while the recovery card still shows scars.
+$('ov-burn').onclick = async () => {
+  if (!wallet) return;
+  if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
+  if (!(await askKey('burn', {
+    title: 'Burn a scarred link?',
+    msg: 'This PERMANENTLY DESTROYS the value locked in the scarred FACT link — it cannot be recovered. Burns one scarred link per run; re-run while scars remain. Enter your wallet key to confirm.',
+    okLabel: 'Burn',
+  }))) return;
+  const btn = $('ov-burn'), out = $('heal-out');
+  const host = ($('c-host')?.value.trim() || 'axiom-dev.mooo.com').replace(/:\d+$/, '');
+  btn.disabled = true; out.textContent = ''; setMsg(''); showProg('Burning scarred link…');
+  try {
+    const maildir = `${PARENT}/${wallet.info().name}/maildir`;
+    const params = {
+      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      k: 3, inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
+      pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
+    };
+    const r = await withReceivePump(host, () => burnScars(wallet, mkTransport(host, 'witness'), params, stepProgress('Burn')));
+    renderOverview();
+    setMsg(`Burned a scarred link · balance ${formatAxc(BigInt(r.newBalance))}`, 'ok');
+  } catch (e) {
+    out.innerHTML = `<span class="err">${errOf(e)}</span>`;
+    setMsg('Burn failed — ' + errOf(e), 'err');
   } finally {
     btn.disabled = false; hideProg();
   }

@@ -120,6 +120,14 @@ export async function heal(wallet, transport, params, onStep) {
   return await healLike(wallet, 'healFund', 'Heal', 'heal', transport, params, onStep);
 }
 
+// Explicit scar-burn — burns ONE scarred FACT link (value DESTROYED). The
+// de-orchestrated counterpart heal NO LONGER does implicitly (see
+// AXIOM_DESIGN_SelfTransactions.md). burnScarsFund → commitHeal
+// (clearClara=false). Re-call while scars remain. User-confirmed in the UI.
+export async function burnScars(wallet, transport, params, onStep) {
+  return await healLike(wallet, 'burnScarsFund', 'Burn', 'scar_burn', transport, params, onStep);
+}
+
 // YPX-020 HAL — RE-ANCHOR a healthy wallet whose prior witnesses are
 // unreachable (dead-overlap). halReanchorFund → commitHeal (which stamps the
 // hibernation lock the produced state carries). Records a HalReanchor history
