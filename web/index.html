@@ -158,7 +158,13 @@
     <div style="margin-top:1rem" class="row">
       <button id="o-create">Create wallet</button>
     </div>
-    <p class="muted" style="margin-top:.8rem">The wallet key signs your transactions and is <b>never stored</b> — if you lose it or mistype it, the wallet can't be recovered. Stored encrypted in this browser.</p>
+    <p class="muted" style="margin-top:.8rem">The wallet key signs your transactions and is <b>never stored</b>. Your wallet is <b>encrypted at rest</b> with this key (PBKDF2 + XSalsa20-Poly1305) before it touches this browser's storage — so the key is also what decrypts it. If you lose or mistype it, the wallet <b>cannot be recovered</b>.</p>
+
+    <div style="margin:1.1rem 0 .3rem;border-top:1px solid #2a2f3a;padding-top:.9rem"></div>
+    <label>Or import a wallet backup</label>
+    <p class="muted" style="margin:.1rem 0 .5rem">Bring a wallet over from the desktop wallet or another browser. On the source, export an <b>encrypted backup</b> (Mac: <b>Wallets → Export</b> → a <code>wallet.axpw</code> file), choose it here, and reuse the <b>Name</b> + <b>Wallet key</b> fields above — the key must be the one the wallet was exported with. The backup is decrypted with that key and re-encrypted at rest in this browser under it (dev passcode + confirm-key don't apply to import).</p>
+    <input type="file" id="o-import-file" accept=".axpw,.axiom,application/octet-stream" />
+    <div style="margin-top:.6rem" class="row"><button id="o-import" class="ghost">Import wallet</button></div>
   </div>
 
   <!-- Unlock -->
@@ -369,6 +375,10 @@
 <!-- 乖乖 (椰子口味) — axiom-denomination canary; 7 taps on the build chip reveals it -->
 <div class="egg" id="egg"><pre id="egg-art"></pre><div class="flavor">乖乖 · 椰子口味</div><div class="hint">click anywhere to dismiss</div></div>
 
+<!-- App-layer at-rest crypto (NOT the SDK): TweetNaCl 1.0.3 sets global `nacl`,
+     used synchronously by vault.js inside the storage shim. Classic script so it
+     loads before the deferred module below and works in the single-file bundle. -->
+<script src="./nacl.min.js"></script>
 <script type="module">
 // DEV cache-bust: always fetch fresh JS + wasm + ELF so a stale cached
 // binding (e.g. an older createWithJsStorage arity) can never be the cause.
@@ -381,6 +391,8 @@ const { fatmamaRegister, kiddoReceiveCycle } = await import('./kiddo.js?v=' + V)
 // Genesis dev-funds claim + redeem (fund/commit splits) and the TOT transport.
 const { claimGenesis, redeem, send, heal, burnScars, halReanchor, halComplete } = await import('./genesis.js?v=' + V);
 const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V);
+// App-layer at-rest encryption for the wallet keystore (app concern, not SDK).
+const { VAULT } = await import('./vault.js?v=' + V);
 
 // ── localStorage-backed Storage (the SDK Storage trait is synchronous;
 // localStorage is the one synchronous browser store, so it works on the
@@ -389,9 +401,22 @@ const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V
 const FS = 'axfs::';
 const b64enc = u8 => { let s=''; for (let i=0;i<u8.length;i++) s+=String.fromCharCode(u8[i]); return btoa(s); };
 const b64dec = str => { const s=atob(str); const u8=new Uint8Array(s.length); for (let i=0;i<s.length;i++) u8[i]=s.charCodeAt(i); return u8; };
+// The wallet keystore (and only it) is encrypted at rest by the app-layer
+// VAULT. maildir, dv counters, and everything else stay plaintext — they hold
+// no secrets and the SDK reaches the keystore through this one path. The shim
+// is SYNCHRONOUS (the wasm SDK calls it inside sync wallet.save() calls), which
+// is exactly why VAULT.seal/open use a synchronous cipher; see vault.js.
+const isKeystore = path => path.endsWith('/wallet.axiom');
 const storage = {
-  read(path){ const v=localStorage.getItem(FS+path); return v===null?null:b64dec(v); },
-  writeAtomic(path,data){ localStorage.setItem(FS+path, b64enc(data)); },
+  read(path){
+    const v=localStorage.getItem(FS+path); if(v===null) return null;
+    const bytes=b64dec(v);
+    return isKeystore(path) ? VAULT.open(bytes, path) : bytes;  // throws VAULT_* on bad key/legacy/tamper
+  },
+  writeAtomic(path,data){
+    const bytes = isKeystore(path) ? VAULT.seal(data, path) : data;
+    localStorage.setItem(FS+path, b64enc(bytes));
+  },
   listDir(path){ const pre=path.endsWith('/')?path:path+'/'; const out=new Set();
     for (let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(!k.startsWith(FS)) continue;
       const p=k.slice(FS.length); if(p.startsWith(pre)){ const rest=p.slice(pre.length); if(rest && !rest.includes('/')) out.add(rest); } }
@@ -503,10 +528,11 @@ function askKey(action, opts={}) {
     input.value=''; err.style.display='none';
     gate.style.display='flex'; setTimeout(()=>input.focus(),0);
     const done = v => { gate.style.display='none'; ok.onclick=null; $('keygate-cancel').onclick=null; input.onkeydown=null; ok.textContent='Authorize'; resolve(v); };
-    const submit = () => {
+    const submit = async () => {
       const pw = input.value;
       if (!pw) { err.textContent='Enter your wallet key.'; err.style.display='block'; return; }
-      if (!check(pw)) { err.textContent='Wrong wallet key.'; err.style.display='block'; input.value=''; input.focus(); return; }
+      let good=false; try { good = await check(pw); } catch(_){ good=false; }  // check may be async (vault unlock)
+      if (!good) { err.textContent='Wrong wallet key.'; err.style.display='block'; input.value=''; input.focus(); return; }
       done(true);
     };
     ok.onclick = submit;
@@ -838,7 +864,7 @@ function renderOverview() {
 // unlock when validators are wired to sendmail for real-email receive.
 const DEV_DOMAIN = 'axiom.internal';
 const DEV_PASSCODE = 'fatmama approve axiom';
-$('o-create').onclick = () => {
+$('o-create').onclick = async () => {
   setMsg('');
   const name = $('o-name').value.trim();
   const local = $('o-email-local').value.trim().toLowerCase();
@@ -853,6 +879,7 @@ $('o-create').onclick = () => {
   const email = `${local}@${DEV_DOMAIN}`;   // dev class — auto-routed to the dev-AXC pool
   try {
     console.log('[axiom] creating wallet', { name, email, parent: PARENT });
+    await VAULT.init(key);   // derive the at-rest key BEFORE create (it persists immediately)
     wallet = Wallet.createWithJsStorage(name, email, key, PARENT, storage);
     console.log('[axiom] created; saving…');
     wallet.save();
@@ -862,28 +889,114 @@ $('o-create').onclick = () => {
     renderOverview();
     console.log('[axiom] overview rendered');
   } catch (e) {
+    VAULT.lock();
     setMsg('Create failed — ' + errOf(e), 'err');
     console.error('[axiom] create failed', e);
   }
 };
 
-$('u-open').onclick = () => {
+// Decode a wallet backup file to canonical AXWL bytes. Accepts the encrypted
+// portable backup "AXPW" (Mac Wallets → Export — PBKDF2 + AES-GCM, decrypted with
+// the wallet key via async WebCrypto, fine at import time) OR a raw AXWL blob.
+// Frame: "AXPW" | ver | kdf | salt(16) | nonce(12) | AES-256-GCM(ct‖tag).
+async function decodePortableBackup(buf, password) {
+  if (buf.length > 34 && buf[0]===0x41 && buf[1]===0x58 && buf[2]===0x50 && buf[3]===0x57) { // "AXPW"
+    const salt = buf.slice(6, 22), nonce = buf.slice(22, 34), ct = buf.slice(34);
+    const enc = new TextEncoder();
+    const dom = enc.encode('AXIOM_PORTABLE_WALLET_v1'), pw = enc.encode(password);
+    const material = new Uint8Array(dom.length + 1 + pw.length);
+    material.set(dom, 0); material[dom.length] = 0; material.set(pw, dom.length + 1);
+    const base = await crypto.subtle.importKey('raw', material, 'PBKDF2', false, ['deriveKey']);
+    const k = await crypto.subtle.deriveKey(
+      { name:'PBKDF2', salt, iterations:600000, hash:'SHA-256' },
+      base, { name:'AES-GCM', length:256 }, false, ['decrypt']);
+    try { return new Uint8Array(await crypto.subtle.decrypt({ name:'AES-GCM', iv:nonce }, k, ct)); }
+    catch (_) { throw new Error('AXPW_BADKEY'); }
+  }
+  return buf;  // raw canonical AXWL — validated by the caller
+}
+
+// Import a wallet from a backup (AXPW encrypted export, or a raw AXWL). JS-only:
+// decode → seal into this browser's at-rest AXEJ envelope under the wallet's own
+// key → open + verifyKey. No new keypair is created — the imported keys are kept.
+$('o-import').onclick = async () => {
+  setMsg('');
+  const name = $('o-name').value.trim();
+  const key = $('o-key').value;
+  const f = $('o-import-file').files[0];
+  if (!name) { setMsg('Enter a wallet name (the Name field above).', 'err'); $('o-name').focus(); return; }
+  if (/[^a-z0-9._-]/i.test(name)) { setMsg('Name: letters, digits, and . _ - only.', 'err'); $('o-name').focus(); return; }
+  if (listWallets().includes(name)) { setMsg(`A wallet named "${name}" already exists in this browser.`, 'err'); return; }
+  if (!key) { setMsg('Enter the wallet key — the password the wallet was exported with.', 'err'); $('o-key').focus(); return; }
+  if (!f) { setMsg('Choose a wallet backup file (.axpw / wallet.axiom) to import.', 'err'); return; }
+  try {
+    const raw = new Uint8Array(await f.arrayBuffer());
+    let buf;
+    try { buf = await decodePortableBackup(raw, key); }
+    catch (pe) {
+      if (String(pe && pe.message || pe).includes('AXPW_BADKEY')) {
+        setMsg('Wrong key for this backup — it must be the wallet key it was exported with.', 'err'); $('o-key').focus(); return;
+      }
+      throw pe;
+    }
+    // After decode, buf must be canonical AXWL (magic "AXWL").
+    if (buf.length < 6 || buf[0]!==0x41 || buf[1]!==0x58 || buf[2]!==0x57 || buf[3]!==0x4C) {
+      setMsg('Not a wallet backup (bad magic). On the Mac wallet use Wallets → Export.', 'err'); return;
+    }
+    await VAULT.init(key);                                       // fresh at-rest key for THIS browser
+    storage.writeAtomic(`${PARENT}/${name}/wallet.axiom`, buf);  // seals the AXWL into an AXEJ frame in localStorage
+    wallet = Wallet.openWithJsStorage(`${PARENT}/${name}`, storage);
+    if (!wallet.verifyKey(key)) {                                // key must match the wallet's own auth_hash
+      try { wallet.close(); } catch(_){} wallet = null; VAULT.lock(); forgetWallet(name);
+      setMsg('Wrong key for this backup — it must be the password the wallet was created with on the source device.', 'err'); $('o-key').focus(); return;
+    }
+    localStorage.setItem('axiom_last_wallet', name);
+    setMsg('');
+    toast('wallet imported');
+    renderOverview();
+  } catch (e) {
+    try { wallet?.close(); } catch(_){} wallet = null; VAULT.lock();
+    try { forgetWallet(name); } catch(_){}                       // don't leave a half-written wallet behind
+    const m = String(e && e.message || e);
+    if (m.includes('VersionMismatch') || m.toLowerCase().includes('version'))
+      setMsg('This backup is an older wallet format and can\'t be imported into this build. Re-export from an up-to-date source.', 'err');
+    else setMsg('Import failed — ' + errOf(e), 'err');
+    console.error('[axiom] import failed', e);
+  }
+};
+
+$('u-open').onclick = async () => {
   setMsg('');
   const name = $('u-wallet').value;
   const key = $('u-key').value;
   if (!name) { setMsg('No wallet selected.', 'err'); return; }
   if (!key)  { setMsg('Enter your wallet key to unlock.', 'err'); $('u-key').focus(); return; }
   try {
+    // Derive the at-rest key from the wallet's stored salt BEFORE opening — the
+    // SDK's open reads the (encrypted) keystore through the shim. A wrong key →
+    // VAULT.open throws VAULT_BADKEY at that read, so decryption IS the gate.
+    const raw = localStorage.getItem(FS + `${PARENT}/${name}/wallet.axiom`);
+    if (raw === null) { setMsg('Wallet data not found in this browser.', 'err'); return; }
+    const frame = b64dec(raw);
+    if (!VAULT.isVaultFrame(frame)) {
+      setMsg('This wallet predates at-rest encryption and can no longer be opened — re-create it (Forget, then New).', 'err'); return;
+    }
+    await VAULT.unlock(key, VAULT.saltOf(frame));
     wallet = Wallet.openWithJsStorage(`${PARENT}/${name}`, storage);
-    if (!wallet.verifyKey(key)) {               // password gate
-      try { wallet.close(); } catch(_){} wallet = null;
+    if (!wallet.verifyKey(key)) {               // protocol owner-proof (YP §39.3) — defence in depth
+      try { wallet.close(); } catch(_){} wallet = null; VAULT.lock();
       setMsg('Wrong wallet key — try again.', 'err'); $('u-key').focus(); return;
     }
     localStorage.setItem('axiom_last_wallet', name);
     $('u-key').value = '';
     setMsg('');
     renderOverview();
-  } catch (e) { setMsg('Open failed — ' + errOf(e), 'err'); console.error('[axiom] open failed', e); }
+  } catch (e) {
+    try { wallet?.close(); } catch(_){} wallet = null; VAULT.lock();
+    const m = String(e && e.message || e);
+    if (m.includes('VAULT_BADKEY')) { setMsg('Wrong wallet key — try again.', 'err'); $('u-key').focus(); }
+    else { setMsg('Open failed — ' + errOf(e), 'err'); console.error('[axiom] open failed', e); }
+  }
 };
 $('u-new').onclick = () => { setMsg(''); $('o-key').value=''; $('o-key2').value=''; show('onboard'); $('o-name').focus(); };
 // Wipe every axfs key for axiom/<name>/... + the last-wallet pointer.
@@ -905,14 +1018,28 @@ $('u-forget').onclick = async () => {
   // Wallet isn't open on the unlock screen — verify by opening it just long
   // enough to check the key (same path as u-open), then close. The key stays
   // inside the gate (masked) and is never shown or cached.
+  // A legacy (pre-encryption) keystore can't be opened to key-verify it — it's
+  // unrecoverable dead data, so allow removal behind a plain confirm.
+  const raw0 = localStorage.getItem(FS + `${PARENT}/${name}/wallet.axiom`);
+  if (raw0 !== null && !VAULT.isVaultFrame(b64dec(raw0))) {
+    if (confirm(`"${name}" predates at-rest encryption and can't be opened. Remove it from this browser?`)) {
+      forgetWallet(name);
+      if (refreshWalletPicker().length === 0) show('onboard'); else show('unlock');
+    }
+    return;
+  }
   const ok = await askKey('forget', {
     title: `Forget "${name}"`, msg: forgetWarn(name), okLabel: 'Forget',
-    verify: pw => {
+    verify: async pw => {
+      if (raw0 === null) return false;
       let w;
-      try { w = Wallet.openWithJsStorage(`${PARENT}/${name}`, storage); }
-      catch (e) { setMsg('Forget failed — could not open wallet: ' + errOf(e), 'err'); return false; }
+      try {
+        await VAULT.unlock(pw, VAULT.saltOf(b64dec(raw0)));   // wrong pw → open throws below
+        w = Wallet.openWithJsStorage(`${PARENT}/${name}`, storage);
+      } catch (e) { VAULT.lock(); return false; }             // VAULT_BADKEY etc. → wrong key
       const good = w.verifyKey(pw);
       try { w.close(); } catch(_){}
+      VAULT.lock();                                            // not staying in this wallet
       return good;
     }
   });
