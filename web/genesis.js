@@ -25,10 +25,24 @@
 //                      //   for the post-round register; [] skips register
 // }
 
+
+// YPX-021 §8.2: cache the writer's OODS reading a fund outcome carried
+// (RegisterAck → machine → outcome.oodsAttestationCbor). The next op sends it
+// to Core; recoveries (heal / HAL / reclaim) REQUIRE a healthy reading — a
+// wallet that never stashed one has every recovery rejected OodsUnhealthyRetry.
+function stashOods(wallet, o) {
+  try {
+    if (o && o.oodsAttestationCbor && o.oodsAttestationCbor.length) {
+      wallet.stashOodsAttestation(o.oodsAttestationCbor);
+    }
+  } catch (_) { /* cache only — never fail the committed op */ }
+}
+
 export async function claimGenesis(wallet, transport, params, onStep) {
   // Phase 1 — network: build the GenesisClaim TX, run CL1 locally, drive
   // the serial k-witness round over TOT. Does not touch wallet state.
   const outcome = await wallet.claimGenesisFund(transport, params, onStep || null);
+  stashOods(wallet, outcome);
 
   // Phase 2 — local: advance wallet state atomically (produced_state_id,
   // balance 0, wallet_seq 1, receipt + FACT chain) and persist.
@@ -61,6 +75,7 @@ export async function claimGenesis(wallet, transport, params, onStep) {
 export async function redeem(wallet, transport, chequeId, redeemParams, onStep) {
   const before = wallet.balance; // BigInt — to compute the credited delta
   const outcome = await wallet.redeemFund(transport, chequeId, redeemParams, onStep || null);
+  stashOods(wallet, outcome);
   wallet.commitRedeem(
     hexToBytes(outcome.producedStateIdHex),
     outcome.newBalance,      // BigInt
@@ -96,6 +111,14 @@ export async function claimAndRedeem(wallet, transport, claimParams, redeemParam
 // pollIntervalMs, pollMaxRounds }. Returns the new (debited) balance.
 export async function send(wallet, transport, to, amountAtoms, reference, params, onStep) {
   const o = await wallet.sendFund(transport, to, amountAtoms, reference, params, onStep || null);
+  // YPX-021 §8.2: stash the writer's OODS reading this round surfaced so the
+  // NEXT op (incl. a recovery, which REQUIRES it under Core's §8.5 gate)
+  // carries it — mirror of native nabla.rs caching it from every RegisterAck.
+  stashOods(wallet, o);
+  // YPX-022 (repurposed): stash the COMPLETED send's tx — the recall target.
+  // Only a completed send is recallable (a sub-quorum send is a no-op under
+  // the quorum gate), so there is nothing to stash on failure.
+  try { if (o.sendTxCbor) wallet.stashLastSendTx(o.sendTxCbor); } catch (_) {}
   wallet.commitSend(
     hexToBytes(o.producedStateIdHex),
     o.newBalance,    // BigInt
@@ -165,7 +188,66 @@ export async function halComplete(wallet, transport, params, onStep) {
   }
   const r = await redeem(wallet, transport, chequeId, params, onStep);
   wallet.clearHibernation();   // §2: mirror CL5's hibernation clear locally
-  return { ...r, hibernationUntil: 0 };
+  return { ...r, chequeId, hibernationUntil: 0 };
+}
+
+// YPX-022 RECALL (repurposed 2026-07-07) — retract a COMPLETED but
+// UNDELIVERED payment (money RECOVERED, unlike heal/burn). recallFund opens
+// the recall RESERVATION at Nabla FIRST (consume-once, §2.2.1: requires a
+// completion-registered + NotRedeemed txid aged into the recall window; the
+// cheque stays redeemable and a racing redeem WINS until the witnessed
+// kind=Recall self-send commits at hibernation-entry), then drives that
+// self-send (no debit). commitRecall persists the recall record + the
+// hibernation stamp. After this the wallet HIBERNATES until recallComplete
+// redeems the recall cheque (the only balance write: B−A + A = B).
+export async function recall(wallet, transport, params, onStep) {
+  const o = await wallet.recallFund(transport, params, onStep || null);
+  stashOods(wallet, o);   // §8.2: the round's fresh reading — the completion redeem NEEDS it (§2.2.2)
+  wallet.commitRecall(
+    hexToBytes(o.producedStateIdHex),
+    o.newBalance,       // BigInt
+    o.newWalletSeq,     // BigInt
+    o.receiptCbor,
+    o.factChainCbor,
+    o.hibernationUntil, // recall stamps RECALL_HIBERNATION_WINDOW
+    hexToBytes(o.recalledTxidHex),
+    hexToBytes(o.recalledStateIdHex),
+    o.recallAmount,
+    o.recallTick,
+  );
+  recordHistory(wallet, o.txidHex, 'Recall', 0n, '', 'recall');
+  return {
+    txid: o.txidHex,
+    recalledTxid: o.recalledTxidHex,
+    recallAmount: o.recallAmount,
+    newBalance: o.newBalance,   // unchanged — recall never debits
+    hibernationUntil: o.hibernationUntil,
+    registered: o.registered,
+    balance: wallet.balance,
+  };
+}
+
+// YPX-022 completion — the same shape as halComplete (§2: the redeem IS the
+// completion): redeem the recall self-cheque, mirror CL5's hibernation clear
+// locally, and fill recall_cheque_id on the wallet's recall record.
+export async function recallComplete(wallet, transport, params, onStep) {
+  const r = await halComplete(wallet, transport, params, onStep);
+  try {
+    // Fill recall_cheque_id on the row this completion redeemed. The
+    // hibernation gate makes >1 open recall impossible in practice (a
+    // second recall can't start until this one completes), so an
+    // unambiguous single open row is the expected case — fill it. If
+    // bookkeeping ever disagrees (multiple open rows), fill NOTHING
+    // rather than guess: an unfilled row only costs a later manual
+    // markRecallCompleted, a wrongly-filled one corrupts the audit row.
+    const open = (wallet.recallRecords() || []).filter(x => !x.recallChequeId);
+    if (open.length === 1) {
+      wallet.markRecallCompleted(open[0].recalledTxidHex, String(r.chequeId || ''));
+    } else if (open.length > 1) {
+      console.warn('[axiom] recallComplete: ' + open.length + ' open recall rows — none auto-filled');
+    }
+  } catch (_) { /* bookkeeping only — never fail the committed redeem */ }
+  return r;
 }
 
 function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
@@ -176,6 +258,7 @@ function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 // `fundFn` is the WASM method name, `histType`/`histRef` the History row labels.
 async function healLike(wallet, fundFn, histType, histRef, transport, params, onStep) {
   const o = await wallet[fundFn](transport, params, onStep || null);
+  stashOods(wallet, o);
   wallet.commitHeal(
     hexToBytes(o.producedStateIdHex),
     o.newBalance,    // BigInt

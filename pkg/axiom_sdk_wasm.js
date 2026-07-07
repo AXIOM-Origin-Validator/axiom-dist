@@ -228,6 +228,38 @@ export class Wallet {
         }
     }
     /**
+     * YPX-022 **commit phase** for a recall (sync, local): persists the
+     * recall bookkeeping row (§2 "Record the recall", REQUIRED) and applies
+     * the witnessed outcome — which stamps the recall hibernation window
+     * the produced state carries. CLARA is never cleared by a recall.
+     * @param {Uint8Array} produced_state_id
+     * @param {bigint} new_balance
+     * @param {bigint} new_wallet_seq
+     * @param {Uint8Array} receipt_cbor
+     * @param {Uint8Array} fact_chain_cbor
+     * @param {bigint} hibernation_until
+     * @param {Uint8Array} recalled_txid
+     * @param {Uint8Array} recalled_state_id
+     * @param {bigint} recall_amount
+     * @param {bigint} recall_tick
+     */
+    commitRecall(produced_state_id, new_balance, new_wallet_seq, receipt_cbor, fact_chain_cbor, hibernation_until, recalled_txid, recalled_state_id, recall_amount, recall_tick) {
+        const ptr0 = passArray8ToWasm0(produced_state_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(receipt_cbor, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(fact_chain_cbor, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArray8ToWasm0(recalled_txid, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArray8ToWasm0(recalled_state_id, wasm.__wbindgen_malloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_commitRecall(this.__wbg_ptr, ptr0, len0, new_balance, new_wallet_seq, ptr1, len1, ptr2, len2, hibernation_until, ptr3, len3, ptr4, len4, recall_amount, recall_tick);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Redeem **commit phase** (sync, local). Credits the balance from a
      * [`Wallet::redeem_fund`] outcome and durably marks the cheque redeemed
      * (double-redeem guard), then persists.
@@ -354,6 +386,17 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * YPX-022 (repurposed): whether a send's tx is cached (→ the "Recall a
+     * payment" affordance can target it). Only a send stashed from THIS
+     * wallet file is recallable — the recall must carry the completed
+     * send's exact signed tx.
+     * @returns {boolean}
+     */
+    get hasRecallableSend() {
+        const ret = wasm.wallet_hasRecallableSend(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Heal / scar-burn — **heal phase** (async, network). Runs
      * [`HealMachine`]: a `kind=Heal` self-send that re-anchors a poisoned
      * state (TX_HEAL, when `garbage_state_ids` is non-empty) or burns the
@@ -410,6 +453,27 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * YPX-022: fill `recall_cheque_id` on the recall record after the
+     * recall cheque's completion redeem (the webclient calls this alongside
+     * `clearHibernation` on the finish-reclaim leg — the wasm redeem path
+     * doesn't fill it implicitly the way native `redeem.rs` does). Returns
+     * `true` when a matching in-flight recall row was updated.
+     * @param {string} recalled_txid_hex
+     * @param {string} cheque_id
+     * @returns {boolean}
+     */
+    markRecallCompleted(recalled_txid_hex, cheque_id) {
+        const ptr0 = passStringToWasm0(recalled_txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_markRecallCompleted(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * Query a Nabla node for a transaction's attestation.
      *
      * Tries each address in turn and resolves with the first successful
@@ -448,6 +512,45 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[1]);
         }
         return Wallet.__wrap(ret[0]);
+    }
+    /**
+     * YPX-022 RECALL (repurposed) — **fund phase** (async, network). Opens
+     * the recall RESERVATION at Nabla FIRST (consume-once, §2.2.1 — refused
+     * with a legible reason unless the send is completion-registered,
+     * NotRedeemed, and aged into the recall window; the cheque STAYS
+     * redeemable and a racing redeem WINS until the witnessed self-send
+     * commits at hibernation-entry), then drives the witnessed
+     * `kind=Recall` self-send with the Nabla-stamped attestation (amount
+     * pinned to the retracted payment's). No
+     * debit — the later redeem of the recall cheque is the only balance
+     * write. Two-phase: pass the resolved outcome to
+     * [`Wallet::commit_recall`]. Completion = redeem the recall self-cheque
+     * after the hibernation window (standard redeem path) +
+     * [`Wallet::clear_hibernation`] + [`Wallet::mark_recall_completed_js`],
+     * exactly like HAL §2 finish-recovery.
+     * @param {any} transport
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    recallFund(transport, params, progress) {
+        const ret = wasm.wallet_recallFund(this.__wbg_ptr, transport, params, progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * YPX-022: the wallet's recall bookkeeping rows, for the UI/audit —
+     * `[{recalledTxidHex, amount, recallTick, recallChequeId|null}]`.
+     * @returns {any}
+     */
+    recallRecords() {
+        const ret = wasm.wallet_recallRecords(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Scan a maildir inbox for cheques addressed to this wallet.
@@ -556,6 +659,38 @@ export class Wallet {
         var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v2;
+    }
+    /**
+     * Stash a send's serde-CBOR transaction (the `sendTxCbor` field
+     * `sendFund` surfaces on resolve) so a completed-but-unclaimed payment
+     * can later be RECALLED (the recall carries the completed send's own
+     * signed tx — Nabla recomputes the txid from it). The browser wallet
+     * has no per-txid Send Proof store, so the most recent send is the
+     * recallable one; persisted in the wallet file.
+     * @param {Uint8Array} tx_cbor
+     */
+    stashLastSendTx(tx_cbor) {
+        const ptr0 = passArray8ToWasm0(tx_cbor, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_stashLastSendTx(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * YPX-021 §8.2: stash the writer's OODS reading a fund outcome surfaced
+     * (`oodsAttestationCbor`) — mirror of native nabla.rs caching it from
+     * every RegisterAck. The NEXT op carries it; recoveries (heal / HAL /
+     * recall) REQUIRE a verified-healthy reading under Core's §8.5 gate.
+     * @param {Uint8Array} att_cbor
+     */
+    stashOodsAttestation(att_cbor) {
+        const ptr0 = passArray8ToWasm0(att_cbor, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_stashOodsAttestation(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * Full wallet status snapshot — pure local read, no network.
@@ -731,9 +866,10 @@ export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, c
  * @param {Uint8Array | null | undefined} txid_attestation
  * @param {Uint8Array} client_private_key
  * @param {number} now
+ * @param {Uint8Array | null} [oods_attestation]
  * @returns {Uint8Array}
  */
-export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, current_hibernation, state_id, cheque_claim_proof, txid_attestation, client_private_key, now) {
+export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, current_hibernation, state_id, cheque_claim_proof, txid_attestation, client_private_key, now, oods_attestation) {
     const ptr0 = passArray8ToWasm0(receiver_pk, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(cheque_bundle, wasm.__wbindgen_malloc);
@@ -746,13 +882,15 @@ export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, 
     var len4 = WASM_VECTOR_LEN;
     const ptr5 = passArray8ToWasm0(client_private_key, wasm.__wbindgen_malloc);
     const len5 = WASM_VECTOR_LEN;
-    const ret = wasm.cl5Run(ptr0, len0, ptr1, len1, current_balance, wallet_seq, current_hibernation, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, now);
+    var ptr6 = isLikeNone(oods_attestation) ? 0 : passArray8ToWasm0(oods_attestation, wasm.__wbindgen_malloc);
+    var len6 = WASM_VECTOR_LEN;
+    const ret = wasm.cl5Run(ptr0, len0, ptr1, len1, current_balance, wallet_seq, current_hibernation, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, now, ptr6, len6);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
-    var v7 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    var v8 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v7;
+    return v8;
 }
 
 /**
@@ -1204,6 +1342,10 @@ function __wbg_get_imports() {
             const ret = arg0.length;
             return ret;
         },
+        __wbg_length_8ee39b2a83a5ebf3: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
         __wbg_length_ba3c032602efe310: function(arg0) {
             const ret = arg0.length;
             return ret;
@@ -1382,7 +1524,7 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 263, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 264, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447);
             return ret;
         },

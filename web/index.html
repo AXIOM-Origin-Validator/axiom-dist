@@ -205,11 +205,13 @@
            hard-rejects every tx except HAL complete / re-anchor, so Send /
            Redeem / Claim / Heal are all disabled (see #main.hibernating). -->
       <div id="ov-hib-banner" class="hib-banner" style="display:none">
-        <b>🌙 Wallet hibernating (HAL)</b>
+        <b>🌙 Wallet hibernating</b>
         <div class="muted" id="ov-hib-detail" style="margin:.35rem 0 .6rem">
-          This wallet re-anchored after a dead-overlap recovery. Sends and
-          redeems are paused until you finish recovery.</div>
-        <button id="ov-hib-finish" style="width:100%">Finish recovery (HAL)</button>
+          This wallet is converging after a recovery (HAL re-anchor or a
+          recalled payment). Sends and redeems are paused until you finish
+          recovery — finishing redeems the recovery cheque and, for a
+          recalled payment, credits the recovered amount back.</div>
+        <button id="ov-hib-finish" style="width:100%">Finish recovery</button>
         <pre id="hib-out" class="muted" style="margin:.6rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
       </div>
     </div>
@@ -281,6 +283,22 @@
         <label>Carrier</label>
         <select id="s-carrier"><option value="tot">TOT (browser · required)</option></select>
         <div style="margin-top:1rem"><button id="s-send" style="width:100%">Send</button></div>
+        <!-- YPX-022 RECALL (repurposed 2026-07-07): retract a COMPLETED but
+             UNDELIVERED payment — the most recent send from this browser,
+             once it has gone unclaimed past the protected window. Shown
+             whenever a completed send's tx is stashed; the network answers a
+             mistimed attempt with a legible too-early / too-late / already-
+             redeemed reason. A redeemed payment can never be recalled. -->
+        <div id="s-recall-box" style="display:none; margin-top:.8rem">
+          <button id="s-recall" style="width:100%">Recall a payment…</button>
+          <pre id="s-recall-out" class="muted" style="margin:.5rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+          <p class="muted" style="margin-top:.5rem">If your most recent payment never reached the
+            receiver (bounced email, dropped connection) and stays unclaimed past the protected
+            window, you can recall it. The receiver keeps priority until the recall commits — a
+            redeem that lands first wins and the payment stands. On commit the undelivered cheque
+            is permanently cancelled network-wide, the wallet briefly hibernates while the retract
+            converges, then "Finish recovery" credits the amount back.</p>
+        </div>
         <p class="muted" id="s-note" style="margin-top:.8rem">Builds the TX, runs CL1 in-browser, then the k=3 S-ABR witness round over TOT and registers with Nabla. Receiver-pays: you lose only the amount (fees are paid by the receiver at redeem). Needs the env host (set on the Overview "Dev funds" card).</p>
       </div>
     </div>
@@ -389,7 +407,7 @@ const _init = _mod.default;
 // Dev mail transport (TOT→FATMAMA): POP3 pull + XAXIOM-REGISTER over the tunnel.
 const { fatmamaRegister, kiddoReceiveCycle } = await import('./kiddo.js?v=' + V);
 // Genesis dev-funds claim + redeem (fund/commit splits) and the TOT transport.
-const { claimGenesis, redeem, send, heal, burnScars, halReanchor, halComplete } = await import('./genesis.js?v=' + V);
+const { claimGenesis, redeem, send, heal, burnScars, halReanchor, halComplete, recall, recallComplete } = await import('./genesis.js?v=' + V);
 const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V);
 // App-layer at-rest encryption for the wallet keystore (app concern, not SDK).
 const { VAULT } = await import('./vault.js?v=' + V);
@@ -723,10 +741,11 @@ async function initClWorker(elf) {
     // Signatures mirror sdk/wasm/src/transport.rs run_cl1 / run_cl5.
     CL1 = (txJson, stateJson, prevReceipts, factChain, privateKey, now) =>
       clCall('cl1', { txJson, stateJson, prevReceipts, factChain, privateKey, now });
-    // current_hibernation arrives LAST positionally (transport.rs pushes it
-    // as the trailing arg); the worker re-inserts it into cl5Run's slot 5.
-    CL5 = (receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now, currentHibernation) =>
-      clCall('cl5', { receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now, currentHibernation });
+    // current_hibernation + oodsAttestation arrive LAST positionally
+    // (transport.rs pushes them as trailing args); the worker re-inserts
+    // hibernation into cl5Run's slot 5 and appends the reading last.
+    CL5 = (receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now, currentHibernation, oodsAttestation) =>
+      clCall('cl5', { receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now, currentHibernation, oodsAttestation });
     console.log('[axiom] CL worker ready — signing runs off the UI thread');
   } catch (e) {
     console.warn('[axiom] CL worker unavailable — signing in-process, UI may pause:', e?.message || e);
@@ -837,6 +856,10 @@ function renderOverview() {
   // clock — cleared only by HAL complete) → show the persistent banner and
   // disable every value-moving op except "Finish recovery". The on-screen
   // estimate is UX only; the real gate is Core's binary flag.
+  // YPX-022 (repurposed): the recall affordance targets the last COMPLETED
+  // send stashed in the wallet file — persists across sessions, so surface
+  // it on every overview render, not just right after a send.
+  try { if (wallet.hasRecallableSend) $('s-recall-box').style.display = ''; } catch (_) {}
   try {
     const hib = Number(wallet.hibernationUntil || 0n);
     const hibernating = hib !== 0;
@@ -845,9 +868,19 @@ function renderOverview() {
     if (hibernating) {
       const nowS = Math.floor(Date.now() / 1000);
       const left = hib - nowS;
+      // YPX-022: an open (un-completed) recall row means this hibernation is
+      // a RECALL converging, not a HAL re-anchor — name it correctly.
+      let recalling = false;
+      try { recalling = (wallet.recallRecords() || []).some(r => !r.recallChequeId); } catch (_) {}
+      const what = recalling
+        ? 'This wallet recalled an undelivered payment; the retract is settling network-wide.'
+        : 'This wallet re-anchored after a dead-overlap recovery.';
+      const finishNote = recalling
+        ? 'Finishing redeems the recall cheque and credits the recovered amount.'
+        : 'You can finish recovery once it passes.';
       $('ov-hib-detail').textContent = left > 0
-        ? `This wallet re-anchored after a dead-overlap recovery. Sends and redeems are paused — convergence window ~${left}s. You can finish recovery once it passes.`
-        : 'This wallet re-anchored after a dead-overlap recovery. The convergence window has passed — finishing recovery is likely ready now.';
+        ? `${what} Sends and redeems are paused — convergence window ~${left}s. ${finishNote}`
+        : `${what} The convergence window has passed — finishing recovery is likely ready now.`;
     }
   } catch (_) { $('main').classList.remove('hibernating'); $('ov-hib-banner').style.display = 'none'; }
   syncCheckModePicker();   // KI#34 WI2/WI5 — reflect this wallet's stored check mode
@@ -1108,9 +1141,27 @@ $('s-send').onclick = async () => {
     setMsg('Send failed — ' + errOf(e), 'err');
     console.error('[axiom] send failed', e);
   } finally {
+    // YPX-022 (repurposed): the recall targets the last COMPLETED send —
+    // offer it whenever one is stashed (genesis.js send() stashes on
+    // success; a sub-quorum send is a no-op under the quorum gate, so a
+    // failure stashes nothing).
+    try { if (wallet.hasRecallableSend) $('s-recall-box').style.display = ''; } catch (_) {}
     btn.disabled = false;
     hideProg();
   }
+};
+
+// YPX-022 RECALL (repurposed) — retract the last completed-but-unclaimed
+// payment. Runs the same op shell as HAL (re-auth gate, progress, receive
+// pump); the reservation opens at Nabla first (a mistimed or settled target
+// comes back with a legible too-early / too-late / already-redeemed /
+// already-recalled reason, nothing spent). On commit the wallet hibernates
+// and the banner's "Finish recovery" redeems the recall cheque.
+$('s-recall').onclick = async () => {
+  await runHalOp(recall, 'Recall payment', $('s-recall'), $('s-recall-out'), 'recall the payment');
+  // Hide the affordance only once the recall actually committed (the wallet
+  // is now hibernating); on refusal it stays visible for a later retry.
+  try { if (Number(wallet.hibernationUntil || 0n) > 0) $('s-recall-box').style.display = 'none'; } catch (_) {}
 };
 
 // Proof tab — offline verification of an imported Send Proof + certificate PDF.
@@ -1530,7 +1581,7 @@ $('ov-burn').onclick = async () => {
 // witness-typed self-send shape as heal; the WASM fund fn picks the kind.
 // Re-anchor hibernates the wallet; complete clears it. Runs the real
 // protocol against the live env — not a simulation.
-async function runHalOp(opFn, label, btn, out, verb) {
+async function runHalOp(opFn, label, btn, out, verb, ttype = 'witness') {
   if (!wallet) return;
   if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
   if (!(await askKey(verb))) return;   // re-auth gate
@@ -1543,7 +1594,7 @@ async function runHalOp(opFn, label, btn, out, verb) {
       k: 3, inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
     };
-    const r = await withReceivePump(host, () => opFn(wallet, mkTransport(host, 'witness'), params, stepProgress(label)));
+    const r = await withReceivePump(host, () => opFn(wallet, mkTransport(host, ttype), params, stepProgress(label)));
     renderOverview();
     setMsg(`${label} done · balance ${formatAxc(BigInt(r.newBalance))}`, 'ok');
   } catch (e) {
@@ -1554,7 +1605,16 @@ async function runHalOp(opFn, label, btn, out, verb) {
   }
 }
 $('ov-hal-reanchor').onclick = () => runHalOp(halReanchor, 'Re-anchor (HAL)', $('ov-hal-reanchor'), $('hal-out'), 're-anchor the wallet (HAL)');
-$('ov-hib-finish').onclick  = () => runHalOp(halComplete, 'Finish recovery', $('ov-hib-finish'), $('hib-out'), 'finish HAL recovery');
+$('ov-hib-finish').onclick  = () => {
+  // YPX-022: an open (un-completed) recall row means this hibernation came
+  // from a reclaim — finish via recallComplete (same redeem + hibernation
+  // clear as HAL §2, plus the recall-record fill). Otherwise plain HAL.
+  let openRecall = false;
+  try { openRecall = (wallet.recallRecords() || []).some(r => !r.recallChequeId); } catch (_) {}
+  // Bug #3: the completion IS a redeem — it must ride the 'redeem'-typed
+  // transport ('witness' intake rejects it with "missing field transaction").
+  return runHalOp(openRecall ? recallComplete : halComplete, 'Finish recovery', $('ov-hib-finish'), $('hib-out'), 'finish recovery', 'redeem');
+};
 
 $('ov-lock').onclick = () => { try { wallet?.close(); } catch(_){} wallet=null; location.reload(); };
 </script>

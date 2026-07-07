@@ -31,9 +31,13 @@ self.onmessage = async (e) => {
       proof = cl1Run(m.txJson, m.stateJson, m.prevReceipts || undefined, m.factChain || undefined, m.privateKey, m.now);
     } else if (m.type === 'cl5') {
       // YPX-020: current_hibernation is cl5Run's slot 5 (after walletSeq).
+      // YPX-022 §2.2.2: oodsAttestation trails — a hibernation-exit
+      // (HAL/RECALL completion) redeem's CL5 must include the reading or
+      // the proof's input_hash mismatches the envelope Lambda recomputes.
       proof = cl5Run(m.receiverPk, m.chequeBundle, BigInt(m.balance), BigInt(m.walletSeq),
                      BigInt(m.currentHibernation || 0), m.stateId,
-                     m.chequeClaimProof || undefined, m.txidAttestation || undefined, m.privateKey, m.now);
+                     m.chequeClaimProof || undefined, m.txidAttestation || undefined, m.privateKey, m.now,
+                     m.oodsAttestation || undefined);
     } else {
       throw new Error('cl-worker: unknown message type ' + m.type);
     }
