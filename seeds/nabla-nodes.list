@@ -3,7 +3,7 @@
 # Same line format as validators.list:  "name", "ed25519 pubkey (64 hex)", "carriers"
 #   pubkey   — the Nabla node's Ed25519 key; empty if not pinned.
 #   carriers — comma-separated <SCHEME>:<addr>. Nabla is reached over TCP;
-#              the HTTP port is derived as tcp_port - 1074 (sdk/src/nabla.rs).
+#              the HTTP port is derived as tcp_port - 1074 (sdk/client/src/nabla.rs).
 #
 # Single source — edit directly, no generator. '#' lines are comments.
 "alpha", "", "TCP:axiom-dev.mooo.com:7300"
