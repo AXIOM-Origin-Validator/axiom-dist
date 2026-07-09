@@ -21,10 +21,10 @@
   "web": {
     "webclient": {
       "version": "3.3.0",
-      "core_id": "78a500aacb3b3ed807240b57875a9dc2d2497cb51f190aa1df55586e9b781868",
+      "core_id": "e10df125e0f8a580a3d0d796395ac10a4dd6448ae30e584a49d4e35f3e0feb68",
       "url": "https://axiom-origin-validator.github.io/axiom-dist/",
-      "html_sha256": "5d8b30be206ae20f3ffda244ed1a7b85c20437f4e913a119260265e1e546456c",
-      "zip_sha256": "293d202dc968c3c491beadb368aa8e43011b8eced8a8e84b286a5b357ec37716",
+      "html_sha256": "933f3e67d394cb1520955b74632a3e02708635ad77e75ebedc2ee6bc622aeb81",
+      "zip_sha256": "1f794150f646d3932bad8a5ce3a6661b218537d03236b09c056c03e87732663a",
       "optional": true
     }
   }
