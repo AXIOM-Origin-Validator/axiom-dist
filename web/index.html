@@ -299,6 +299,21 @@
             is permanently cancelled network-wide, the wallet briefly hibernates while the retract
             converges, then "Finish recovery" credits the amount back.</p>
         </div>
+        <!-- Resumable interrupted send (2026-07-08): a per-hop witness timeout
+             is the browser's patience expiring, NOT a protocol verdict — the
+             signed tx + collected sigs stay valid (no witness expiry), and a
+             response arriving after the timeout still counts. The round was
+             saved; Resume sweeps late responses and continues the SAME tx.
+             Shown while the round is still valid (the wallet hasn't moved). -->
+        <div id="s-interrupted-box" style="display:none; margin-top:.8rem">
+          <b style="font-size:13px">⏸ Interrupted send — resumable</b>
+          <div class="muted" id="s-interrupted-detail" style="margin:.35rem 0"></div>
+          <div style="display:flex; gap:.5rem">
+            <button id="s-resume" style="flex:1">Resume</button>
+            <button id="s-discard" class="secondary" style="flex:1">Discard</button>
+          </div>
+          <pre id="s-interrupted-out" class="muted" style="margin:.5rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+        </div>
         <p class="muted" id="s-note" style="margin-top:.8rem">Builds the TX, runs CL1 in-browser, then the k=3 S-ABR witness round over TOT and registers with Nabla. Receiver-pays: you lose only the amount (fees are paid by the receiver at redeem). Needs the env host (set on the Overview "Dev funds" card).</p>
       </div>
     </div>
@@ -407,7 +422,7 @@ const _init = _mod.default;
 // Dev mail transport (TOT→FATMAMA): POP3 pull + XAXIOM-REGISTER over the tunnel.
 const { fatmamaRegister, kiddoReceiveCycle } = await import('./kiddo.js?v=' + V);
 // Genesis dev-funds claim + redeem (fund/commit splits) and the TOT transport.
-const { claimGenesis, redeem, send, heal, burnScars, halReanchor, halComplete, recall, recallComplete } = await import('./genesis.js?v=' + V);
+const { claimGenesis, redeem, send, heal, burnScars, halReanchor, halComplete, recall, recallComplete, resumeSend } = await import('./genesis.js?v=' + V);
 const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V);
 // App-layer at-rest encryption for the wallet keystore (app concern, not SDK).
 const { VAULT } = await import('./vault.js?v=' + V);
@@ -860,6 +875,9 @@ function renderOverview() {
   // send stashed in the wallet file — persists across sessions, so surface
   // it on every overview render, not just right after a send.
   try { if (wallet.hasRecallableSend) $('s-recall-box').style.display = ''; } catch (_) {}
+  // Resumable interrupted send (2026-07-08): surface Resume/Discard while a
+  // timed-out round is still valid (the wallet hasn't moved since).
+  refreshInterruptedSendBox();
   try {
     const hib = Number(wallet.hibernationUntil || 0n);
     const hibernating = hib !== 0;
@@ -1146,9 +1164,48 @@ $('s-send').onclick = async () => {
     // success; a sub-quorum send is a no-op under the quorum gate, so a
     // failure stashes nothing).
     try { if (wallet.hasRecallableSend) $('s-recall-box').style.display = ''; } catch (_) {}
+    // Resumable rounds: a per-hop timeout just persisted the round — surface
+    // the Resume/Discard affordance immediately (the catch above showed the
+    // "Send failed — …" timeout message).
+    refreshInterruptedSendBox();
     btn.disabled = false;
     hideProg();
   }
+};
+
+// Toggle the "interrupted send — resumable" box from wallet.resumableSend()
+// (null when there's no valid round). Called on overview render + after a send.
+function refreshInterruptedSendBox() {
+  try {
+    const rs = wallet && wallet.resumableSend ? wallet.resumableSend() : null;
+    const box = $('s-interrupted-box');
+    if (!box) return;
+    if (rs) {
+      box.style.display = '';
+      $('s-interrupted-detail').textContent =
+        `To ${rs.to} · ${formatAxc(BigInt(rs.amount))} · ${rs.sigsHave}/${rs.sigsNeeded} witnesses collected. ` +
+        `A response arriving after the timeout still counts — Resume sweeps it and continues the same payment.`;
+    } else {
+      box.style.display = 'none';
+    }
+  } catch (_) { /* best-effort UI */ }
+}
+
+// Resume the interrupted send — the same op shell as HAL/recall (re-auth gate,
+// progress, receive pump). The SDK sweeps late responses + continues the SAME
+// tx; on success the round is discarded and the balance is debited.
+$('s-resume').onclick = async () => {
+  await runHalOp(resumeSend, 'Resume send', $('s-resume'), $('s-interrupted-out'), 'resume the interrupted send');
+  refreshInterruptedSendBox();
+};
+
+// Discard the interrupted round (nothing from it was committed; balance
+// untouched). Pure-local — no network.
+$('s-discard').onclick = () => {
+  if (!wallet) return;
+  try { wallet.discardResumableSend(); } catch (_) {}
+  refreshInterruptedSendBox();
+  setMsg('Interrupted send discarded — nothing was committed.', 'ok');
 };
 
 // YPX-022 RECALL (repurposed) — retract the last completed-but-unclaimed

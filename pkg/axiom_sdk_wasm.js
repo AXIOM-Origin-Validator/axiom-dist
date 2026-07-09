@@ -367,6 +367,16 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Explicitly abandon the interrupted send round (the user chose not to
+     * resume). Nothing from it was committed; balance is untouched.
+     */
+    discardResumableSend() {
+        const ret = wasm.wallet_discardResumableSend(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * YPX-020 HAL — RE-ANCHOR a healthy wallet whose prior witnesses are
      * unreachable (dead-overlap). A `kind=HalReanchor` self-send Core CL2
      * accepts WITHOUT the S-ABR overlap requirement; the produced state
@@ -599,6 +609,45 @@ export class Wallet {
         const ptr0 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.wallet_redeemFund(this.__wbg_ptr, transport, ptr0, len0, params, progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * The interrupted-but-resumable send round on this wallet, if one is still
+     * valid (the wallet hasn't moved since the timeout). Returns a plain JS
+     * object `{ to, amount, sigsHave, sigsNeeded, createdAtSecs }` or `null`.
+     * A stale / wrong-format round is cleaned up and reported as `null`. Cheap
+     * local read — safe to poll on pane entry / overview render.
+     * @returns {any}
+     */
+    resumableSend() {
+        const ret = wasm.wallet_resumableSend(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Resume the interrupted send round — **fund phase** (async, network).
+     * Re-enters the SAME [`SendMachine`] with the persisted round: sweep the
+     * inbox for responses that arrived after the timeout, then continue the
+     * remaining hops with the SAME tx (same txid ⇒ the content-keyed YPX-016
+     * witness cache replays a committed validator's response). Resolves with
+     * the SAME outcome shape as `sendFund` — pass it to [`Wallet::commit_send`].
+     * Errors with `WalletStateStale` if the wallet moved since the interruption
+     * (the round is discarded; nothing from it was committed). `params` is the
+     * same shape `sendFund` takes (validators, k, nablaTcpAddresses, inbox
+     * paths, poll settings); the recipient / amount / reference come from the
+     * persisted round.
+     * @param {any} transport
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    resumeSend(transport, params, progress) {
+        const ret = wasm.wallet_resumeSend(this.__wbg_ptr, transport, params, progress);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -1377,7 +1426,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1399,7 +1448,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1524,8 +1573,8 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 264, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 258, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1569,15 +1618,15 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447(arg0, arg1, arg2) {
-    const ret = wasm.wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
 }
 
-function wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(arg0, arg1, arg2, arg3) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(arg0, arg1, arg2, arg3);
+function wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3);
 }
 
 const WalletFinalization = (typeof FinalizationRegistry === 'undefined')

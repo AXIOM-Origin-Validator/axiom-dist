@@ -135,6 +135,39 @@ export async function send(wallet, transport, to, amountAtoms, reference, params
   };
 }
 
+// Resumable rounds (2026-07-08) — RESUME an interrupted send. Witnessing has
+// no protocol expiry, so a per-hop timeout only means the browser stopped
+// waiting; the SendMachine persisted the round and this re-enters the SAME
+// pipeline: sweep the inbox for responses that arrived after the timeout, then
+// continue the remaining hops with the SAME tx (same txid — the content-keyed
+// YPX-016 witness cache replays a committed validator's response). Same
+// fund→commit shape as send(); on completion the balance is debited. `params`
+// is the same shape send() takes — the recipient/amount come from the round.
+export async function resumeSend(wallet, transport, params, onStep) {
+  // Read the round descriptor BEFORE resuming — the round is discarded on
+  // completion, and we want its to/amount for the History row.
+  let desc = null;
+  try { desc = wallet.resumableSend(); } catch (_) {}
+  const o = await wallet.resumeSend(transport, params, onStep || null);
+  stashOods(wallet, o);
+  try { if (o.sendTxCbor) wallet.stashLastSendTx(o.sendTxCbor); } catch (_) {}
+  wallet.commitSend(
+    hexToBytes(o.producedStateIdHex),
+    o.newBalance,    // BigInt
+    o.newWalletSeq,  // BigInt
+    o.receiptCbor,
+    o.factChainCbor,
+  );
+  recordHistory(wallet, o.txidHex, 'Send',
+    desc ? desc.amount : 0n, desc ? desc.to : '', 'resume');
+  return {
+    txid: o.txidHex,
+    newBalance: o.newBalance,
+    registered: o.registered,
+    balance: wallet.balance, // now debited
+  };
+}
+
 // Heal / scar-burn: healFund (async/network — TX_HEAL re-anchor or scar
 // burn, auto-selected from wallet state) → commitHeal (sync, clears CLARA
 // state for TX_HEAL). `params` = same shape as send/redeem. Returns the
