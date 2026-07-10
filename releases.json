@@ -16,14 +16,6 @@
       "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/download/clients-ff15b5db-2.16.6/unclesam-ff15b5db-0.3.1.dmg",
       "sha256": "7e50115ad7d5309616aad1302a91a2992d68718773b69d075ea8d4bb559ad2cd",
       "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/clients-ff15b5db-2.16.6"
-    },
-    "axiomkiddo": {
-      "version": "2.15.0",
-      "core_id": "42285e6bd3110d2ce97b465d431cf12ba0be5f58b410785a012f4218b27afccc",
-      "dmg": "AxiomWallet.dmg",
-      "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/latest/download/AxiomWallet.dmg",
-      "sha256": "09d9a1f77a38f78592717a42662187ad78a374ddf14c43552f358edef1326aef",
-      "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/axiomwallet-42285e6b-2.22.4-20260710"
     }
   },
   "web": {
