@@ -314,12 +314,48 @@
           </div>
           <pre id="s-interrupted-out" class="muted" style="margin:.5rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
         </div>
+        <!-- YPX-001 §1.5.1 — scar-consent PAUSE. The validators paused this
+             payment because the money carries unverified provenance link(s)
+             (its own, or INHERITED from whoever paid you — §1.5.1a). Nothing
+             was witnessed and no funds moved. The RECEIVER was notified with a
+             6-digit passcode; they give it to you out-of-band, and that hand-off
+             IS their consent to inherit the scars. -->
+        <div id="s-scar-box" style="display:none; margin-top:.8rem">
+          <b style="font-size:13px">⏸ Payment paused — receiver consent required</b>
+          <div class="muted" id="s-scar-detail" style="margin:.35rem 0"></div>
+          <div style="display:flex; gap:.5rem; align-items:center">
+            <input id="s-scar-code" inputmode="numeric" maxlength="6" placeholder="6-digit passcode"
+                   style="flex:1; letter-spacing:.15em; text-align:center; font:14px ui-monospace,monospace" />
+            <button id="s-scar-send" style="flex:1">Complete payment</button>
+            <button id="s-scar-discard" class="secondary" style="flex:0 0 auto">Cancel</button>
+          </div>
+          <pre id="s-scar-out" class="muted" style="margin:.5rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+        </div>
         <p class="muted" id="s-note" style="margin-top:.8rem">Builds the TX, runs CL1 in-browser, then the k=3 S-ABR witness round over TOT and registers with Nabla. Receiver-pays: you lose only the amount (fees are paid by the receiver at redeem). Needs the env host (set on the Overview "Dev funds" card).</p>
       </div>
     </div>
 
     <!-- Receive tab -->
     <div id="tab-receive" class="hidden">
+      <!-- YPX-001 §1.5.1 — INCOMING payment paused for YOUR consent. The
+           sender's money carries unverified provenance link(s); if you accept,
+           your wallet INHERITS those scars (§1.5.1a — they stay visible on
+           everything you go on to spend, until the original transaction is
+           re-registered or burned). ACCEPT by giving the sender the passcode
+           out-of-band — that hand-off IS the consent, which is why there is no
+           "accept" button that calls the network. DECLINE by doing nothing:
+           the payment simply never happens and no funds move either way. -->
+      <div class="card" id="r-consent-card" style="display:none">
+        <h2>⏸ Payment awaiting your consent</h2>
+        <p class="muted" style="margin:.1rem 0 .7rem">
+          Someone is trying to pay you with money that has unverified history. Nothing has moved.
+          To <b>accept</b>, give the sender the passcode below — that is your consent, and your wallet
+          will inherit the marks until the original payment is cleaned up by its sender.
+          To <b>decline</b>, do nothing.
+        </p>
+        <div id="r-consent-list"></div>
+      </div>
+
       <!-- Pull first — the primary receive action. -->
       <div class="card">
         <h2>Pending cheques</h2>
@@ -422,7 +458,7 @@ const _init = _mod.default;
 // Dev mail transport (TOT→FATMAMA): POP3 pull + XAXIOM-REGISTER over the tunnel.
 const { fatmamaRegister, kiddoReceiveCycle } = await import('./kiddo.js?v=' + V);
 // Genesis dev-funds claim + redeem (fund/commit splits) and the TOT transport.
-const { claimGenesis, redeem, send, heal, burnScars, halReanchor, halComplete, recall, recallComplete, resumeSend } = await import('./genesis.js?v=' + V);
+const { claimGenesis, redeem, send, sendWithScarPasscode, heal, burnScars, halReanchor, halComplete, recall, recallComplete, resumeSend } = await import('./genesis.js?v=' + V);
 const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V);
 // App-layer at-rest encryption for the wallet keystore (app concern, not SDK).
 const { VAULT } = await import('./vault.js?v=' + V);
@@ -580,6 +616,10 @@ addEventListener('error', e => setMsg('JS error: ' + (e.message || e.error || e)
 addEventListener('unhandledrejection', e => setMsg('Unhandled: ' + errOf(e.reason), 'err'));
 
 let wallet = null;
+// YPX-001 §1.5.1 — incoming payments paused pending THIS wallet's consent.
+// recvScarConsents() consumes each notification from the maildir exactly once
+// (like recv() does for cheques), so accumulate them for the session.
+let SCAR_CONSENTS = [];
 // The wallet key is NEVER cached. Unlock verifies it to open the wallet, then
 // discards it; every value-moving op re-prompts via askKey(). This is what
 // stops an unlocked-but-unattended screen from being used to move funds.
@@ -878,6 +918,7 @@ function renderOverview() {
   // Resumable interrupted send (2026-07-08): surface Resume/Discard while a
   // timed-out round is still valid (the wallet hasn't moved since).
   refreshInterruptedSendBox();
+  refreshScarConsentBox();
   try {
     const hib = Number(wallet.hibernationUntil || 0n);
     const hibernating = hib !== 0;
@@ -1156,8 +1197,16 @@ $('s-send').onclick = async () => {
     setMsg(`Sent ${amt} AXC to ${to} · txid ${String(r.txid).slice(0, 16)}… · registered=${r.registered}`, 'ok');
     $('s-to').value = ''; $('s-amt').value = '';
   } catch (e) {
-    setMsg('Send failed — ' + errOf(e), 'err');
-    console.error('[axiom] send failed', e);
+    // YPX-001 §1.5.1 — the consent gate PAUSED this payment. It is NOT a
+    // failure: nothing was witnessed and no funds moved. Say so plainly and
+    // surface the passcode box instead of an alarming error.
+    if (e && e.code === 'ScarConsentRequired') {
+      setMsg('Payment paused — the receiver must consent before they can accept this money.', 'warn');
+      console.info('[axiom] scar-consent pause', e);
+    } else {
+      setMsg('Send failed — ' + errOf(e), 'err');
+      console.error('[axiom] send failed', e);
+    }
   } finally {
     // YPX-022 (repurposed): the recall targets the last COMPLETED send —
     // offer it whenever one is stashed (genesis.js send() stashes on
@@ -1168,10 +1217,78 @@ $('s-send').onclick = async () => {
     // the Resume/Discard affordance immediately (the catch above showed the
     // "Send failed — …" timeout message).
     refreshInterruptedSendBox();
+    refreshScarConsentBox();
+  refreshScarConsentBox();
     btn.disabled = false;
     hideProg();
   }
 };
+
+// ── YPX-001 §1.5.1 — scar-consent (SENDER side) ────────────────────────────
+// The gate PAUSED a payment: the money's provenance carries unverified links,
+// so the receiver must consent before inheriting them. Nothing was witnessed;
+// no funds moved. The SDK persisted the paused send, so this survives a reload.
+function refreshScarConsentBox() {
+  try {
+    const rec = wallet && wallet.pendingScarSend ? wallet.pendingScarSend() : null;
+    const box = $('s-scar-box');
+    if (!box) return;
+    if (!rec) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    const amt = lDollar(rec.amount);
+    if (!rec.current) {
+      // The wallet moved, so the paused txid can never be matched again.
+      $('s-scar-detail').innerHTML =
+        `<span class="err">This paused payment can no longer be completed</span> — the wallet has ` +
+        `moved on since it was paused. Cancel it and send again; the receiver will get a new passcode.`;
+      $('s-scar-send').disabled = true;
+    } else {
+      $('s-scar-send').disabled = false;
+      $('s-scar-detail').innerHTML =
+        `<b>${amt} AXC</b> to <b>${rec.to}</b> is waiting for the receiver's consent. ` +
+        `They were sent a 6-digit passcode — ask them for it and enter it here. ` +
+        `<span class="muted">Nothing has been sent yet; your balance is untouched.</span>`;
+    }
+  } catch (_) { /* no wallet yet */ }
+}
+
+// ── YPX-001 §1.5.1 — scar-consent (RECEIVER side) ──────────────────────────
+// Incoming payments PAUSED pending this wallet's consent. Accepting means
+// inheriting the sender's unverified provenance (§1.5.1a): those marks travel
+// with everything this wallet later spends, until the ORIGINAL payment is
+// cleaned up (re-registered or burned) by whoever made it. There is
+// deliberately NO accept button that calls the network — handing the passcode
+// to the sender IS the consent. Doing nothing declines.
+async function refreshScarConsents() {
+  try {
+    if (!wallet || !wallet.recvScarConsents) return;
+    const maildir = `${PARENT}/${wallet.info().name}/maildir`;
+    const list = wallet.recvScarConsents(maildir) || [];
+    if (list.length) {
+      SCAR_CONSENTS = SCAR_CONSENTS.concat(list);
+    }
+    const card = $('r-consent-card');
+    const out = $('r-consent-list');
+    if (!card || !out) return;
+    if (!SCAR_CONSENTS.length) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    out.innerHTML = SCAR_CONSENTS.map((c) => {
+      const amt = lDollar(c.amount);
+      const marks = c.scarCount === 1 ? '1 unverified link' : `${c.scarCount} unverified links`;
+      return `<div style="border:1px solid var(--line); border-radius:8px; padding:.6rem; margin-bottom:.5rem">
+        <div><b>${amt} AXC</b> from <b>${c.sender}</b></div>
+        <div class="muted" style="margin:.25rem 0 .5rem">
+          This money carries ${marks} in its history. If you accept, your wallet inherits those
+          marks until the sender cleans them up.
+        </div>
+        <div style="display:flex; align-items:center; gap:.6rem">
+          <span class="muted" style="font-size:11px">Give the sender this passcode to accept:</span>
+          <code style="font:16px ui-monospace,monospace; letter-spacing:.18em">${c.passcode}</code>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) { console.warn('[axiom] scar consents', e); }
+}
 
 // Toggle the "interrupted send — resumable" box from wallet.resumableSend()
 // (null when there's no valid round). Called on overview render + after a send.
@@ -1197,6 +1314,7 @@ function refreshInterruptedSendBox() {
 $('s-resume').onclick = async () => {
   await runHalOp(resumeSend, 'Resume send', $('s-resume'), $('s-interrupted-out'), 'resume the interrupted send');
   refreshInterruptedSendBox();
+  refreshScarConsentBox();
 };
 
 // Discard the interrupted round (nothing from it was committed; balance
@@ -1205,7 +1323,63 @@ $('s-discard').onclick = () => {
   if (!wallet) return;
   try { wallet.discardResumableSend(); } catch (_) {}
   refreshInterruptedSendBox();
+  refreshScarConsentBox();
   setMsg('Interrupted send discarded — nothing was committed.', 'ok');
+};
+
+// YPX-001 §1.5.1 — complete the paused payment with the receiver's passcode.
+// Re-initiates the SAME transaction (same txid) so the validator that stored
+// the passcode can match it; that validator then issues a consent voucher which
+// clears the round's other witnesses. This is the first time funds move.
+$('s-scar-send').onclick = async () => {
+  if (!wallet) return;
+  const btn = $('s-scar-send');
+  const out = $('s-scar-out');
+  const code = ($('s-scar-code').value || '').trim();
+  if (!/^\d{6}$/.test(code)) { out.textContent = 'Enter the 6-digit passcode the receiver gave you.'; return; }
+  const host = envHost();
+  if (!host) { out.textContent = 'Set the env host on the Overview first.'; return; }
+  btn.disabled = true;
+  out.textContent = '';
+  try {
+    const maildir = `${PARENT}/${wallet.info().name}/maildir`;
+    const transport = mkTransport(host, 'witness');
+    const params = {
+      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      k: 3,
+      inboxNew: `${maildir}/inbox/new`,
+      inboxCur: `${maildir}/inbox/cur`,
+      pollIntervalMs: 250,
+      pollMaxRounds: 720,
+      nablaTcpAddresses: NABLAS,
+    };
+    showProg('Completing the paused payment…');
+    const r = await withReceivePump(host, () =>
+      sendWithScarPasscode(wallet, transport, params, Number(code), stepProgress('Send')));
+    renderOverview();
+    tab('overview');
+    setMsg(`Payment completed · txid ${String(r.txid).slice(0, 16)}… · registered=${r.registered}`, 'ok');
+    $('s-scar-code').value = '';
+  } catch (e) {
+    // A wrong / expired code keeps the paused record AND the validator's stored
+    // passcode — the user simply re-enters it. Everything else is surfaced as-is.
+    out.textContent = errOf(e);
+    console.warn('[axiom] scar passcode', e);
+  } finally {
+    btn.disabled = false;
+    hideProg();
+    refreshScarConsentBox();
+  }
+};
+
+// Cancel the paused payment. Pure-local and non-destructive: nothing was ever
+// witnessed for it, so no funds move either way. (Declining is also what the
+// RECEIVER does by simply never sharing the passcode.)
+$('s-scar-discard').onclick = () => {
+  if (!wallet) return;
+  try { wallet.discardPendingScarSend(); } catch (_) {}
+  refreshScarConsentBox();
+  setMsg('Paused payment cancelled — nothing was sent.', 'ok');
 };
 
 // YPX-022 RECALL (repurposed) — retract the last completed-but-unclaimed
@@ -1370,6 +1544,10 @@ async function receiveCycle() {
     kiddoReceiveCycle({ smtpWs: `ws://${host}:7400/fatmama/0`, pop3Ws: `ws://${host}:7400/fatmama/1`, email: wallet.info().email, storage, walletDir: `${PARENT}/${wallet.info().name}` }),
     new Promise((_, rej) => setTimeout(() => rej(new Error('pull timed out')), 18000)),
   ]).catch(() => {});
+  // YPX-001 §1.5.1 — scan for scar-consent notifications BEFORE recv() sweeps
+  // the maildir. These are incoming payments PAUSED pending this wallet's
+  // consent: nothing has moved, and the sender needs the passcode from us.
+  await refreshScarConsents();
   renderCheques(wallet.recv(`${PARENT}/${wallet.info().name}/maildir`) || []);
 }
 $('r-refresh').onclick = async () => {

@@ -367,6 +367,16 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Discard the paused send (the receiver declined, or the user gave up).
+     * Non-destructive: nothing was ever witnessed for the paused txid.
+     */
+    discardPendingScarSend() {
+        const ret = wasm.wallet_discardPendingScarSend(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Explicitly abandon the interrupted send round (the user chose not to
      * resume). Nothing from it was committed; balance is untouched.
      */
@@ -524,6 +534,24 @@ export class Wallet {
         return Wallet.__wrap(ret[0]);
     }
     /**
+     * The interrupted-but-resumable send round on this wallet, if one is still
+     * valid (the wallet hasn't moved since the timeout). Returns a plain JS
+     * object `{ to, amount, sigsHave, sigsNeeded, createdAtSecs }` or `null`.
+     * A stale / wrong-format round is cleaned up and reported as `null`. Cheap
+     * local read — safe to poll on pane entry / overview render.
+     * Load the persisted paused send, if any. `null` when there is none.
+     * `current: false` means the wallet moved since the pause — the stored
+     * txid can no longer match, so a fresh send is required.
+     * @returns {any}
+     */
+    pendingScarSend() {
+        const ret = wasm.wallet_pendingScarSend(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * YPX-022 RECALL (repurposed) — **fund phase** (async, network). Opens
      * the recall RESERVATION at Nabla FIRST (consume-once, §2.2.1 — refused
      * with a legible reason unless the send is completion-registered,
@@ -583,6 +611,27 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Scan the maildir inbox for scar-consent notifications addressed to THIS
+     * wallet — i.e. incoming payments PAUSED pending this wallet's consent.
+     * Returns `[{ txid, sender, receiver, amount, scarCount, passcode }]`.
+     *
+     * ACCEPT = give the sender the passcode out-of-band (that hand-off IS the
+     * consent — there is deliberately no network call here). DECLINE = do
+     * nothing; the paused payment simply never happens and no funds move
+     * either way.
+     * @param {string} maildir_path
+     * @returns {any}
+     */
+    recvScarConsents(maildir_path) {
+        const ptr0 = passStringToWasm0(maildir_path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_recvScarConsents(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Redeem a stored cheque bundle — **redeem phase** (async, network).
      *
      * Runs [`RedeemMachine`]: query-txid → register-cheque-claim → CL5 →
@@ -615,11 +664,6 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * The interrupted-but-resumable send round on this wallet, if one is still
-     * valid (the wallet hasn't moved since the timeout). Returns a plain JS
-     * object `{ to, amount, sigsHave, sigsNeeded, createdAtSecs }` or `null`.
-     * A stale / wrong-format round is cleaned up and reported as `null`. Cheap
-     * local read — safe to poll on pane entry / overview render.
      * @returns {any}
      */
     resumableSend() {

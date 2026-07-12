@@ -110,6 +110,32 @@ export async function claimAndRedeem(wallet, transport, claimParams, redeemParam
 // BigInt; `params` = { validators, k, nablaTcpAddresses, inboxNew, inboxCur,
 // pollIntervalMs, pollMaxRounds }. Returns the new (debited) balance.
 export async function send(wallet, transport, to, amountAtoms, reference, params, onStep) {
+  return await sendInner(wallet, transport, to, amountAtoms, reference, params, onStep);
+}
+
+// YPX-001 §1.5.1 — RE-INITIATE a send the scar-consent gate PAUSED, once the
+// receiver has shared their 6-digit passcode. The paused send is persisted by
+// the SendMachine; the recipient / amount / reference / nonce / epoch are taken
+// from that record INSIDE the SDK (not from here), so the rebuilt tx reproduces
+// the SAME txid and the validator can match the passcode it stored. Nothing was
+// witnessed while paused, so this is the first and only time funds move.
+export async function sendWithScarPasscode(wallet, transport, params, passcode, onStep) {
+  const rec = wallet.pendingScarSend();
+  if (!rec) throw new Error('No paused payment awaiting consent.');
+  if (!rec.current) {
+    throw new Error(
+      'This wallet has moved since the payment was paused, so the paused payment can no longer ' +
+      'be completed. Start a fresh send — it will pause again and the receiver will get a new passcode.'
+    );
+  }
+  const p = Object.assign({}, params, { scarPasscode: passcode >>> 0 });
+  return await sendInner(wallet, transport, rec.to, BigInt(rec.amount), rec.reference, p, onStep);
+}
+
+// The ONE send tail — fund → stash → commit → history. `send()` and
+// `sendWithScarPasscode()` differ only in the params they hand the SDK, never
+// in what they do with the outcome (no forked commit logic).
+async function sendInner(wallet, transport, to, amountAtoms, reference, params, onStep) {
   const o = await wallet.sendFund(transport, to, amountAtoms, reference, params, onStep || null);
   // YPX-021 §8.2: stash the writer's OODS reading this round surfaced so the
   // NEXT op (incl. a recovery, which REQUIRES it under Core's §8.5 gate)
