@@ -23,8 +23,8 @@
       "version": "3.3.0",
       "core_id": "d0900069b15fd08df63af27298e5cb7c9ee32aa8c592b44c9d968d993e768e48",
       "url": "https://axiom-origin-validator.github.io/axiom-dist/",
-      "html_sha256": "2afac7aa1a80fc7ebafabc076ba014133229a3037d38c976e69bf7d624a4b65d",
-      "zip_sha256": "1ce4e19dc05941b6496ad5f70393c93249e6f107935fd967b21f3714f6feaa7c",
+      "html_sha256": "cc47c2548918411e0fd104b369b4869e707ffca68888689ac2febf1023d4a54c",
+      "zip_sha256": "84dad49a4df493655c74fbb84fab121d3fc7073135b96e84f7e7141c8d8b9e77",
       "optional": true
     }
   }
