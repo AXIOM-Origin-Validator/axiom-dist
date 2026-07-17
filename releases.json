@@ -2,12 +2,12 @@
   "schema": 1,
   "products": {
     "axiomwallet": {
-      "version": "2.24.0",
+      "version": "2.24.1",
       "core_id": "ce00aacc80f80734345756eb059a87ed74d22047fb5ca161c5cf1a1e97e6bb8e",
       "dmg": "AxiomWallet.dmg",
       "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/latest/download/AxiomWallet.dmg",
-      "sha256": "e967208cbb0928833b08bfa81913501e98131e44b46ff0628baa8464fc39983a",
-      "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/axiomwallet-ce00aacc-2.24.0-20260717"
+      "sha256": "1cfe4f7586bcc7cd69d7c36c23c84d7a7454d1e7780e5e338b96070e3bc3de56",
+      "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/axiomwallet-ce00aacc-2.24.1-20260717"
     },
     "unclesam": {
       "version": "0.3.1",
