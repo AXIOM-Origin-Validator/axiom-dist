@@ -11,7 +11,7 @@
 "gamma", "", "TCP:axiom-dev.mooo.com:7302"
 "delta", "", "TCP:axiom-dev.mooo.com:7303"
 "epsilon", "", "TCP:axiom-dev.mooo.com:7304"
-"zeta", "", "TCP:axiom-dev.mooo.com:7305"
+"zeta", "", "TCP:axiom-zeta.mooo.com:7305"
 "eta", "", "TCP:axiom-dev.mooo.com:7306"
 "theta", "", "TCP:axiom-dev.mooo.com:7307"
 "iota", "", "TCP:axiom-dev.mooo.com:7308"
