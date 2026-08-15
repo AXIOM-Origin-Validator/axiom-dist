@@ -244,8 +244,10 @@ trap 'kill "$NPID" 2>/dev/null || true' INT TERM
 
 # Three milestones, in order. We watch the log for ALL of them continuously so a
 # fast exit still reports which ones were actually reached (and which truly failed).
-M_LABEL=("Core software verified" "Joined — got a network identity" "Synced & armed (ready to serve)")
-M_RX=("Core pin OK|loaded ELF matches" "NBC obtained from peer|NBC written" '\[ARMED\]')
+# NOTE: real startup order is IDENTITY(NBC) → Core-pin → ARMED (nabla fetches its
+# NBC before loading the ELF), so the identity milestone comes first.
+M_LABEL=("Reached the network — got an identity (NBC)" "Core software verified" "Synced & armed (ready to serve)")
+M_RX=("NBC obtained from peer|NBC written|Node ID .from NBC" "Core pin OK|loaded ELF matches" '\[ARMED\]')
 M_HIT=(0 0 0)
 DEADLINE=$(( $(date +%s) + 240 ))
 spin=0
@@ -272,13 +274,14 @@ if [ "${M_HIT[2]}" != 1 ]; then
   printf '  What the node reported:\n'
   grep -iE "FATAL|ERROR|Cannot reach|Could not obtain|refused|no route|resolve" "$RUNLOG" 2>/dev/null | tail -4 | sed 's/^/    /'
   echo
-  if [ "$failed" = 1 ]; then
+  if [ "$failed" = 0 ]; then
     cat <<EOF
-  It reached a mesh node? No — it couldn't get a network identity (NBC), which
-  means it couldn't reach any bootstrap peer. Most common causes:
-    • Same LAN as the mesh: re-run pointing at the mesh box's LAN IP —
+  It couldn't get a network identity (NBC) — meaning it couldn't reach any mesh
+  node OR the node it reached didn't answer. Check, in order:
+    • TCP (not just ping) to a mesh node:   nc -vz <mesh-ip> <port>   (e.g. 7300)
+    • Same LAN? re-run pointing at the mesh box's LAN IP —
         AXIOM_BOOTSTRAP=<mesh-ip>  curl -fsSL .../install-nabla.sh | bash
-    • Public join: the seed addresses must be reachable from this network.
+    • If TCP works but NBC still fails, the mesh node isn't issuing — check its side.
 EOF
   else
     echo "  See the full log for details."
