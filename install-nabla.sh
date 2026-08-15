@@ -117,6 +117,9 @@ cp "$B/zkvm/axiom-core.elf" "$DATA_DIR/zkvm/axiom-core.elf"
 if grep -q '^name' "$DATA_DIR/node.toml"; then
   sed -i "s/^name.*/name = \"$NODE_NAME\"/" "$DATA_DIR/node.toml"
 fi
+# keep node.toml ports in sync with the chosen values (the `nabla` CLI reads dashboard_port from here)
+sed -i "s/^port.*/port = $PORT/"                          "$DATA_DIR/node.toml" 2>/dev/null || true
+sed -i "s/^dashboard_port.*/dashboard_port = $DASH_PORT/" "$DATA_DIR/node.toml" 2>/dev/null || true
 
 # ── 4. advertise address (peers dial this back; a wildcard bind must never leak) ──
 if [ -z "$ADVERTISE" ]; then
@@ -170,24 +173,98 @@ WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
 
+# ── 6. launch + guided connect trace (built for someone new to this) ──
+RUN_CMD=(/usr/local/bin/nabla-node --mode tcp --bind 0.0.0.0
+  --port "$PORT" --advertise "$ADVERTISE"
+  --data "$DATA_DIR" --config "$DATA_DIR/node.toml"
+  --bootstrap "$DATA_DIR/bootstrap.toml" --avm-elf "$ELF"
+  --txid-mode "$TXID_MODE" --dashboard-port "$DASH_PORT")
+
 cat <<EOF
-  ── Step 1: WATCH IT CONNECT (foreground; Ctrl-C to stop) ──
-    nabla-node --mode tcp --bind 0.0.0.0 --port $PORT --advertise $ADVERTISE \\
-      --data $DATA_DIR --config $DATA_DIR/node.toml \\
-      --bootstrap $DATA_DIR/bootstrap.toml --avm-elf $ELF \\
-      --txid-mode $TXID_MODE \\
-      --dashboard-port $DASH_PORT
 
-    Look for:  "Core pin OK"  →  "NBC obtained from peer"  →  "[ARMED]"  →  TARDIS attach.
-
-  ── Step 2: once it connects, run it as a service ──
-    sudo systemctl enable --now axiom-nabla
-    journalctl -u axiom-nabla -f
-
-  ── Check status anytime ──
-    nabla              # clean status card: Read/Write, signed tick, TARDIS parent, peers, IP, mode
-    nabla --watch      # live-refreshing
-    nabla --json       # raw /status
+  Your node is ready. It will run as:
+    ${RUN_CMD[*]}
 
 EOF
-say "Done. Run Step 1 to see it join the network, then 'nabla' for a status card."
+
+ans="y"
+if [ -r /dev/tty ]; then
+  printf '\033[36m▸ Start it now and watch it connect to the network? [Y/n]: \033[0m' > /dev/tty
+  read -r ans < /dev/tty || ans="y"
+fi
+case "${ans:-y}" in
+  n|N|no|NO|No)
+    say "Not started. When you're ready:  sudo systemctl enable --now axiom-nabla   (then check with: nabla)"
+    exit 0 ;;
+esac
+
+RUNLOG="$DATA_DIR/first-run.log"
+: > "$RUNLOG"
+say "Starting the node. Joining the network takes about 1–3 minutes — watching progress:"
+echo
+"${RUN_CMD[@]}" > "$RUNLOG" 2>&1 &
+NPID=$!
+trap 'kill "$NPID" 2>/dev/null || true' INT TERM
+
+# watch_step <regex> <friendly label> <timeout-seconds>
+watch_step() {
+  local rx="$1" label="$2" to="$3" t=0
+  printf '  \033[2m…\033[0m %s' "$label"
+  while [ "$t" -lt "$to" ]; do
+    if ! kill -0 "$NPID" 2>/dev/null; then printf '\r  \033[1;31m✗\033[0m %s — the node stopped unexpectedly\n' "$label"; return 1; fi
+    if grep -qiE "$rx" "$RUNLOG" 2>/dev/null; then printf '\r  \033[1;32m✓\033[0m %s%*s\n' "$label" 12 ''; return 0; fi
+    sleep 2; t=$((t + 2))
+    printf '\r  \033[2m…\033[0m %s  \033[2m(%ss)\033[0m' "$label" "$t"
+  done
+  printf '\r  \033[1;31m✗\033[0m %s — timed out\n' "$label"; return 1
+}
+
+ok=1
+watch_step "Core pin OK|loaded ELF matches"        "Core software verified"            25  || ok=0
+if [ "$ok" = 1 ]; then watch_step "NBC obtained from peer|NBC written" "Joined — got a network identity"   120 || ok=0; fi
+if [ "$ok" = 1 ]; then watch_step '\[ARMED\]'                          "Synced and armed (ready to serve)" 200 || ok=0; fi
+
+if [ "$ok" != 1 ]; then
+  echo
+  printf '  \033[1;31mCouldn'\''t fully connect.\033[0m Last few log lines:\n'
+  tail -n 6 "$RUNLOG" 2>/dev/null | sed 's/^/    /'
+  cat <<EOF
+
+  Things to check (no experience needed — go top to bottom):
+    • Is the Pi online? It must reach the internet to find the AXIOM network.
+    • Is the Pi on the SAME home network as the mesh? The public addresses may not
+      loop back — edit  $DATA_DIR/bootstrap.toml  to use the mesh box's LAN IP.
+    • Full log is here:  $RUNLOG
+  The node has been stopped. Fix the above and re-run the installer to try again.
+EOF
+  kill "$NPID" 2>/dev/null || true
+  exit 1
+fi
+
+echo
+say "✓ CONNECTED — your nabla node is live on the AXIOM network. Here's its status:"
+sleep 3
+/usr/local/bin/nabla --port "$DASH_PORT" 2>/dev/null || true
+
+keep="y"
+if [ -r /dev/tty ]; then
+  printf '\n\033[36m▸ Keep it running on every boot (recommended — installs a background service)? [Y/n]: \033[0m' > /dev/tty
+  read -r keep < /dev/tty || keep="y"
+fi
+case "${keep:-y}" in
+  n|N|no|NO|No)
+    say "OK — not installing the service. It is running now but will stop when this session ends."
+    say "To start it yourself later:  ${RUN_CMD[*]}"
+    kill "$NPID" 2>/dev/null || true ;;
+  *)
+    say "Installing the background service (it will restart on boot/crash) ..."
+    kill "$NPID" 2>/dev/null || true
+    wait "$NPID" 2>/dev/null || true
+    if sudo systemctl enable --now axiom-nabla; then
+      sleep 5
+      /usr/local/bin/nabla --port "$DASH_PORT" 2>/dev/null || true
+      say "Running as a service ✓   Live logs:  journalctl -u axiom-nabla -f    Status card:  nabla"
+    else
+      say "Service install needs sudo — run it yourself:  sudo systemctl enable --now axiom-nabla"
+    fi ;;
+esac
