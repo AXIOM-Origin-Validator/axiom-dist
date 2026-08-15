@@ -9,10 +9,13 @@
 #  watch it obtain its NBC, arm, and attach to TARDIS. Daemonize afterwards
 #  with the printed `systemctl` command.
 #
+#  Prompts for the mesh TCP port (default 6225). Preset AXIOM_PORT to skip the
+#  prompt (non-interactive installs).
+#
 #  Overridable via env:
 #    AXIOM_NODE_NAME   node name in the mesh   (default nabla-pi-<hostname>)
 #    AXIOM_ADVERTISE   host:port peers dial you back on (default: public IP:PORT)
-#    AXIOM_PORT        mesh TCP port           (default 6225)
+#    AXIOM_PORT        mesh TCP port           (default 6225; prompted if unset)
 #    AXIOM_DATA_DIR    data dir                (default ~/.axiom)
 # ═══════════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -20,8 +23,7 @@ set -euo pipefail
 REPO="AXIOM-Origin-Validator/axiom-dist"
 DATA_DIR="${AXIOM_DATA_DIR:-$HOME/.axiom}"
 NODE_NAME="${AXIOM_NODE_NAME:-nabla-pi-$(hostname -s 2>/dev/null || echo node)}"
-PORT="${AXIOM_PORT:-6225}"
-DASH_PORT="${AXIOM_DASHBOARD_PORT:-6226}"
+PORT="${AXIOM_PORT:-}"
 ADVERTISE="${AXIOM_ADVERTISE:-}"
 
 say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
@@ -35,6 +37,23 @@ case "$arch" in
 esac
 command -v curl >/dev/null || die "curl is required."
 command -v tar  >/dev/null || die "tar is required."
+
+# ── 1b. choose the mesh TCP port (prompt unless AXIOM_PORT preset) ──
+#     Read from /dev/tty so the prompt works even under `curl ... | bash`,
+#     where the script body itself occupies stdin.
+if [ -z "$PORT" ]; then
+  if [ -r /dev/tty ]; then
+    printf '\033[36m▸ Mesh TCP port for this node [6225]: \033[0m' > /dev/tty
+    read -r PORT < /dev/tty || PORT=""
+  fi
+  PORT="${PORT:-6225}"
+fi
+case "$PORT" in
+  ''|*[!0-9]*) die "Port must be a number (got '$PORT')." ;;
+esac
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "Port out of range: $PORT"
+DASH_PORT="${AXIOM_DASHBOARD_PORT:-$((PORT + 1))}"
+say "Using mesh port $PORT (dashboard $DASH_PORT)."
 
 # ── 2. find + download the newest linux-arm64 nabla release asset ──
 #     Scan ALL releases (newest first) rather than /releases/latest — the
