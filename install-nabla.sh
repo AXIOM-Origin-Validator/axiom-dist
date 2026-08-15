@@ -16,6 +16,7 @@
 #    AXIOM_NODE_NAME   node name in the mesh   (default nabla-pi-<hostname>)
 #    AXIOM_ADVERTISE   host:port peers dial you back on (default: public IP:PORT)
 #    AXIOM_PORT        mesh TCP port           (default 6225; prompted if unset)
+#    AXIOM_TXID_MODE   bloom | hashmap         (default bloom/standard; prompted if unset)
 #    AXIOM_DATA_DIR    data dir                (default ~/.axiom)
 # ═══════════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -25,6 +26,7 @@ DATA_DIR="${AXIOM_DATA_DIR:-$HOME/.axiom}"
 NODE_NAME="${AXIOM_NODE_NAME:-nabla-pi-$(hostname -s 2>/dev/null || echo node)}"
 PORT="${AXIOM_PORT:-}"
 ADVERTISE="${AXIOM_ADVERTISE:-}"
+TXID_MODE="${AXIOM_TXID_MODE:-}"   # bloom (standard) | hashmap (recording)
 
 say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -54,6 +56,33 @@ esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "Port out of range: $PORT"
 DASH_PORT="${AXIOM_DASHBOARD_PORT:-$((PORT + 1))}"
 say "Using mesh port $PORT (dashboard $DASH_PORT)."
+
+# ── 1c. storage mode: standard (bloom) vs recording (hashmap) ──
+#     Standard keeps a compact bloom txid filter (tens of MB). Recording keeps
+#     an exact hashmap of every network txid — it earns ~5x more CC but its disk
+#     use grows with the whole network's transaction history (plan a big disk).
+if [ -z "$TXID_MODE" ]; then
+  if [ -r /dev/tty ]; then
+    {
+      printf '\n  Storage mode for this node:\n'
+      printf '    1) Standard   — bloom txid filter, low disk (~tens of MB).           [default]\n'
+      printf '    2) Recording  — exact hashmap: earns ~5x more CC, but needs MUCH more\n'
+      printf '                    disk (grows with ALL network txids — use a large SSD/HDD).\n'
+      printf '  \033[36m▸ Choose [1]: \033[0m'
+    } > /dev/tty
+    read -r _m < /dev/tty || _m=""
+  fi
+  case "${_m:-1}" in
+    2|hashmap|recording) TXID_MODE=hashmap ;;
+    *)                   TXID_MODE=bloom ;;
+  esac
+fi
+case "$TXID_MODE" in bloom|hashmap) ;; *) die "AXIOM_TXID_MODE must be bloom or hashmap (got '$TXID_MODE')." ;; esac
+if [ "$TXID_MODE" = hashmap ]; then
+  say "Storage mode: RECORDING (hashmap) — ~5x CC, large disk required."
+else
+  say "Storage mode: standard (bloom)."
+fi
 
 # ── 2. find + download the newest linux-arm64 nabla release asset ──
 #     Scan ALL releases (newest first) rather than /releases/latest — the
@@ -121,6 +150,7 @@ ExecStart=/usr/local/bin/nabla-node \\
     --data $DATA_DIR --config $DATA_DIR/node.toml \\
     --bootstrap $DATA_DIR/bootstrap.toml \\
     --avm-elf $ELF \\
+    --txid-mode $TXID_MODE \\
     --dashboard-port $DASH_PORT
 Restart=on-failure
 RestartSec=10
@@ -141,6 +171,7 @@ cat <<EOF
     nabla-node --mode tcp --bind 0.0.0.0 --port $PORT --advertise $ADVERTISE \\
       --data $DATA_DIR --config $DATA_DIR/node.toml \\
       --bootstrap $DATA_DIR/bootstrap.toml --avm-elf $ELF \\
+      --txid-mode $TXID_MODE \\
       --dashboard-port $DASH_PORT
 
     Look for:  "Core pin OK"  →  "NBC obtained from peer"  →  "[ARMED]"  →  TARDIS attach.
