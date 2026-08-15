@@ -4,7 +4,7 @@
 #
 #    curl -fsSL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/main/install-nabla.sh | bash
 #
-#  Installs the pinned nabla-node (CoreID 9f8015fd), the matching Core ELF and
+#  Installs the pinned nabla-node (CoreID 862f4c7e), the matching Core ELF and
 #  the live mesh seed list, then runs the node in the FOREGROUND so you can
 #  watch it obtain its NBC, arm, and attach to TARDIS. Daemonize afterwards
 #  with the printed `systemctl` command.
@@ -171,7 +171,7 @@ cat <<EOF
       node name : $NODE_NAME
       advertise : $ADVERTISE   (peers dial you here — port-forward ${PORT}/tcp for inbound)
       data dir  : $DATA_DIR
-      Core ELF  : $ELF   (pinned CoreID 9f8015fd)
+      Core ELF  : $ELF   (pinned CoreID 862f4c7e)
 
 EOF
 
