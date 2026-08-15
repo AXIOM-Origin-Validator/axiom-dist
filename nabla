@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+# ═══════════════════════════════════════════════════════════════════════
+#  nabla — AXIOM Nabla node status CLI (read-only client)
+#
+#  Queries the local node's monitor endpoint (http://127.0.0.1:<dashboard>/status)
+#  and prints a clean status card: Read/Write role, current signed TICK, TARDIS
+#  parent, downstream peers, advertised address, storage mode, uptime.
+#
+#  Usage:
+#    nabla                 status card (default)
+#    nabla --json          raw JSON from /status
+#    nabla --watch [N]     refresh every N seconds (default 2)
+#    nabla --port PORT     dashboard port (default: node.toml dashboard_port, else 6226)
+#    nabla --host HOST     host (default 127.0.0.1)
+# ═══════════════════════════════════════════════════════════════════════
+import json, os, re, sys, time, urllib.request
+
+DATA_DIR = os.environ.get("AXIOM_DATA_DIR", os.path.expanduser("~/.axiom"))
+
+def c(code, s):
+    return s if not sys.stdout.isatty() else f"\033[{code}m{s}\033[0m"
+
+def dashboard_port():
+    # CLI flag wins, else node.toml dashboard_port, else 6226.
+    if "--port" in sys.argv:
+        return int(sys.argv[sys.argv.index("--port") + 1])
+    try:
+        with open(os.path.join(DATA_DIR, "node.toml")) as f:
+            m = re.search(r'^\s*dashboard_port\s*=\s*(\d+)', f.read(), re.M)
+            if m:
+                return int(m.group(1))
+    except OSError:
+        pass
+    return 6226
+
+def host():
+    return sys.argv[sys.argv.index("--host") + 1] if "--host" in sys.argv else "127.0.0.1"
+
+def fetch(h, port):
+    url = f"http://{h}:{port}/status"
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return json.load(r)
+
+def fmt_uptime(s):
+    s = int(s); d, s = divmod(s, 86400); h, s = divmod(s, 3600); m, s = divmod(s, 60)
+    return (f"{d}d " if d else "") + f"{h}h {m}m {s}s"
+
+def short(x, n=10):
+    x = str(x or "")
+    return x[:n] + "…" if len(x) > n else x
+
+def card(st):
+    name = st.get("node_name", "?")
+    ver = st.get("version", "?")
+    writer = st.get("is_writer", False)
+    slot = st.get("tardis_slot", "?")
+    active = st.get("tardis_active", False)
+    tick = st.get("current_tick", 0)
+    tw = st.get("ticks_with_current_parent", 0)
+    up_name = st.get("upstream_name") or ""
+    up_hex = st.get("upstream_hex") or ""
+    has_up = st.get("has_upstream", False)
+    dc = st.get("downstream_count", 0)
+    listen = st.get("listen_addr", "?")
+    wan = st.get("wan_addr")
+    mode = st.get("txid_service", "bloom")
+    hm_len = st.get("txid_hashmap_len", 0)
+    bloom_ct = st.get("txid_bloom_count", 0)
+    nid = st.get("node_id_hex", "?")
+    up = st.get("uptime_secs", 0)
+
+    role = c("1;32", "● WRITE  (TARDIS writer)") if writer else c("1;36", "○ READ")
+    dot = c("1;32", "●") if active else c("1;31", "○")
+    if has_up and up_name:
+        parent = f"{c('1;35','← '+up_name)}  ({short(up_hex,8)})   ·  {tw} ticks w/ parent"
+    elif writer:
+        parent = c("2", "— (this node is a writer; no upstream)")
+    else:
+        parent = c("1;31", "— none (orphan / attaching)")
+    if mode == "hashmap":
+        modestr = c("1;33", "hashmap (RECORDING)") + f"  ·  {hm_len:,} txids exact"
+    else:
+        modestr = "bloom (standard)" + f"  ·  {bloom_ct:,} txids seen"
+    addr = wan if wan else "(not advertised)"
+
+    W = 58
+    line = c("2", "─" * W)
+    print()
+    print(f"  {c('1','AXIOM Nabla')}  ·  {c('1;37', name)}   {c('2', 'v'+str(ver).lstrip('v'))}")
+    print("  " + line)
+    print(f"  {'Status':<12}{role}")
+    print(f"  {'TARDIS':<12}{dot} {slot}   (active={active})")
+    print(f"  {'Signed tick':<12}{c('1;37', f'{tick:,}')}")
+    print(f"  {'Parent':<12}{parent}")
+    print(f"  {'Downstream':<12}{dc} peer(s)")
+    print(f"  {'Address':<12}{c('1;37', addr)}   {c('2','listen '+listen)}")
+    print(f"  {'Storage':<12}{modestr}")
+    print(f"  {'Node ID':<12}{short(nid,16)}")
+    print(f"  {'Uptime':<12}{fmt_uptime(up)}")
+    print("  " + line)
+    print()
+
+def main():
+    h, port = host(), dashboard_port()
+    try:
+        st = fetch(h, port)
+    except Exception as e:
+        print(c("1;31", f"✗ cannot reach nabla monitor at http://{h}:{port}/status"))
+        print(c("2", f"  ({e})"))
+        print(c("2", "  Is the node running?  systemctl status axiom-nabla   (or run it foreground)"))
+        sys.exit(1)
+    if "--json" in sys.argv:
+        print(json.dumps(st, indent=2)); return
+    if "--watch" in sys.argv:
+        i = sys.argv.index("--watch")
+        every = int(sys.argv[i + 1]) if i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit() else 2
+        try:
+            while True:
+                os.system("clear"); card(fetch(h, port)); time.sleep(every)
+        except KeyboardInterrupt:
+            pass
+        return
+    card(st)
+
+if __name__ == "__main__":
+    main()

@@ -106,6 +106,10 @@ mkdir -p "$DATA_DIR/config" "$DATA_DIR/zkvm"
 SUDO=""; [ -w /usr/local/bin ] || SUDO="sudo"
 $SUDO install -m 0755 "$B/bin/nabla-node"     /usr/local/bin/nabla-node
 [ -x "$B/bin/nabla-ceremony" ] && $SUDO install -m 0755 "$B/bin/nabla-ceremony" /usr/local/bin/nabla-ceremony || true
+# status CLI (read-only client; fetched from the repo so it updates independently)
+if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/nabla" -o "$tmp/nabla-cli" 2>/dev/null; then
+  $SUDO install -m 0755 "$tmp/nabla-cli" /usr/local/bin/nabla && say "Installed 'nabla' status CLI → /usr/local/bin/nabla"
+fi
 cp "$B/zkvm/axiom-core.elf" "$DATA_DIR/zkvm/axiom-core.elf"
 [ -f "$DATA_DIR/node.toml" ]      || cp "$B/node.toml"      "$DATA_DIR/node.toml"
 [ -f "$DATA_DIR/bootstrap.toml" ] || cp "$B/bootstrap.toml" "$DATA_DIR/bootstrap.toml"
@@ -180,5 +184,10 @@ cat <<EOF
     sudo systemctl enable --now axiom-nabla
     journalctl -u axiom-nabla -f
 
+  ── Check status anytime ──
+    nabla              # clean status card: Read/Write, signed tick, TARDIS parent, peers, IP, mode
+    nabla --watch      # live-refreshing
+    nabla --json       # raw /status
+
 EOF
-say "Done. Run Step 1 to see it join the network."
+say "Done. Run Step 1 to see it join the network, then 'nabla' for a status card."
