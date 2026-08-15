@@ -17,6 +17,7 @@
 #    AXIOM_ADVERTISE   host:port peers dial you back on (default: public IP:PORT)
 #    AXIOM_PORT        mesh TCP port           (default 6225; prompted if unset)
 #    AXIOM_TXID_MODE   bloom | hashmap         (default bloom/standard; prompted if unset)
+#    AXIOM_BOOTSTRAP   mesh node host[:port] to join via (e.g. a LAN IP); prompted if unset
 #    AXIOM_DATA_DIR    data dir                (default ~/.axiom)
 # ═══════════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -26,7 +27,8 @@ DATA_DIR="${AXIOM_DATA_DIR:-$HOME/.axiom}"
 NODE_NAME="${AXIOM_NODE_NAME:-nabla-pi-$(hostname -s 2>/dev/null || echo node)}"
 PORT="${AXIOM_PORT:-}"
 ADVERTISE="${AXIOM_ADVERTISE:-}"
-TXID_MODE="${AXIOM_TXID_MODE:-}"   # bloom (standard) | hashmap (recording)
+TXID_MODE="${AXIOM_TXID_MODE:-}"       # bloom (standard) | hashmap (recording)
+BOOTSTRAP_ADDR="${AXIOM_BOOTSTRAP:-}"  # host[:port] of a mesh node to join via; blank = bundled public seeds
 
 say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -84,6 +86,23 @@ else
   say "Storage mode: standard (bloom)."
 fi
 
+# ── 1d. bootstrap peer — which mesh node to first contact ──
+#     Blank = the bundled public seed list. On a private/LAN mesh, enter the
+#     mesh box's reachable IP (one peer is enough — the rest come via gossip).
+if [ -z "$BOOTSTRAP_ADDR" ] && [ -r /dev/tty ]; then
+  {
+    printf '\n  Bootstrap peer — the mesh node this node first contacts:\n'
+    printf '    • Same LAN as the mesh? enter the mesh box IP (e.g. 172.20.0.42)\n'
+    printf '    • Leave blank to use the built-in public seed list.\n'
+    printf '  \033[36m▸ Bootstrap host[:port] (blank = default): \033[0m'
+  } > /dev/tty
+  read -r BOOTSTRAP_ADDR < /dev/tty || BOOTSTRAP_ADDR=""
+fi
+if [ -n "$BOOTSTRAP_ADDR" ]; then
+  case "$BOOTSTRAP_ADDR" in *:*) : ;; *) BOOTSTRAP_ADDR="$BOOTSTRAP_ADDR:7300" ;; esac
+  say "Bootstrap peer: $BOOTSTRAP_ADDR"
+fi
+
 # ── 2. find + download the newest linux-arm64 nabla release asset ──
 #     Scan ALL releases (newest first) rather than /releases/latest — the
 #     wallet DMG owns the "latest" flag, and nabla ships as its own release.
@@ -112,7 +131,16 @@ if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/nabla" -o "$tmp/nabl
 fi
 cp "$B/zkvm/axiom-core.elf" "$DATA_DIR/zkvm/axiom-core.elf"
 [ -f "$DATA_DIR/node.toml" ]      || cp "$B/node.toml"      "$DATA_DIR/node.toml"
-[ -f "$DATA_DIR/bootstrap.toml" ] || cp "$B/bootstrap.toml" "$DATA_DIR/bootstrap.toml"
+if [ -n "$BOOTSTRAP_ADDR" ]; then
+  # explicit bootstrap peer wins (overwrite) — one peer is enough, gossip finds the rest
+  cat > "$DATA_DIR/bootstrap.toml" <<EOF
+# AXIOM Nabla — bootstrap peer (set by installer)
+[[peer]]
+address = "$BOOTSTRAP_ADDR"
+EOF
+else
+  [ -f "$DATA_DIR/bootstrap.toml" ] || cp "$B/bootstrap.toml" "$DATA_DIR/bootstrap.toml"
+fi
 # stamp the node name
 if grep -q '^name' "$DATA_DIR/node.toml"; then
   sed -i "s/^name.*/name = \"$NODE_NAME\"/" "$DATA_DIR/node.toml"
@@ -123,8 +151,16 @@ sed -i "s/^dashboard_port.*/dashboard_port = $DASH_PORT/" "$DATA_DIR/node.toml" 
 
 # ── 4. advertise address (peers dial this back; a wildcard bind must never leak) ──
 if [ -z "$ADVERTISE" ]; then
-  pubip="$(curl -fsSL https://api.ipify.org 2>/dev/null || true)"
-  host="${pubip:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+  bhost="${BOOTSTRAP_ADDR%%:*}"
+  lanip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  # If joining a private/LAN mesh, peers reach us on our LAN IP — advertise that,
+  # not the shared public IP. Otherwise advertise the public IP.
+  if printf '%s' "$bhost" | grep -qE '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; then
+    host="$lanip"
+  else
+    pubip="$(curl -fsSL https://api.ipify.org 2>/dev/null || true)"
+    host="${pubip:-$lanip}"
+  fi
   ADVERTISE="${host}:${PORT}"
 fi
 ELF="$DATA_DIR/zkvm/axiom-core.elf"
@@ -206,37 +242,49 @@ echo
 NPID=$!
 trap 'kill "$NPID" 2>/dev/null || true' INT TERM
 
-# watch_step <regex> <friendly label> <timeout-seconds>
-watch_step() {
-  local rx="$1" label="$2" to="$3" t=0
-  printf '  \033[2m…\033[0m %s' "$label"
-  while [ "$t" -lt "$to" ]; do
-    if ! kill -0 "$NPID" 2>/dev/null; then printf '\r  \033[1;31m✗\033[0m %s — the node stopped unexpectedly\n' "$label"; return 1; fi
-    if grep -qiE "$rx" "$RUNLOG" 2>/dev/null; then printf '\r  \033[1;32m✓\033[0m %s%*s\n' "$label" 12 ''; return 0; fi
-    sleep 2; t=$((t + 2))
-    printf '\r  \033[2m…\033[0m %s  \033[2m(%ss)\033[0m' "$label" "$t"
+# Three milestones, in order. We watch the log for ALL of them continuously so a
+# fast exit still reports which ones were actually reached (and which truly failed).
+M_LABEL=("Core software verified" "Joined — got a network identity" "Synced & armed (ready to serve)")
+M_RX=("Core pin OK|loaded ELF matches" "NBC obtained from peer|NBC written" '\[ARMED\]')
+M_HIT=(0 0 0)
+DEADLINE=$(( $(date +%s) + 240 ))
+spin=0
+while :; do
+  for i in 0 1 2; do
+    if [ "${M_HIT[$i]}" = 0 ] && grep -qiE "${M_RX[$i]}" "$RUNLOG" 2>/dev/null; then
+      M_HIT[$i]=1
+      printf '  \033[1;32m✓\033[0m %s\n' "${M_LABEL[$i]}"
+    fi
   done
-  printf '\r  \033[1;31m✗\033[0m %s — timed out\n' "$label"; return 1
-}
+  [ "${M_HIT[2]}" = 1 ] && break
+  if ! kill -0 "$NPID" 2>/dev/null; then break; fi          # node exited
+  [ "$(date +%s)" -ge "$DEADLINE" ] && break                # overall timeout
+  spin=$((spin + 1)); printf '\r  \033[2m… working (%ss)\033[0m   ' "$((spin * 2))"
+  sleep 2
+done
+printf '\r                          \r'
 
-ok=1
-watch_step "Core pin OK|loaded ELF matches"        "Core software verified"            25  || ok=0
-if [ "$ok" = 1 ]; then watch_step "NBC obtained from peer|NBC written" "Joined — got a network identity"   120 || ok=0; fi
-if [ "$ok" = 1 ]; then watch_step '\[ARMED\]'                          "Synced and armed (ready to serve)" 200 || ok=0; fi
-
-if [ "$ok" != 1 ]; then
+if [ "${M_HIT[2]}" != 1 ]; then
+  # find the first milestone NOT reached — that is the true failure point
+  failed=0; for i in 0 1 2; do [ "${M_HIT[$i]}" = 0 ] && { failed=$i; break; }; done
+  printf '  \033[1;31m✗\033[0m %s\n\n' "${M_LABEL[$failed]}"
+  printf '  \033[1;31mCould not fully connect — stopped at: %s\033[0m\n' "${M_LABEL[$failed]}"
+  printf '  What the node reported:\n'
+  grep -iE "FATAL|ERROR|Cannot reach|Could not obtain|refused|no route|resolve" "$RUNLOG" 2>/dev/null | tail -4 | sed 's/^/    /'
   echo
-  printf '  \033[1;31mCouldn'\''t fully connect.\033[0m Last few log lines:\n'
-  tail -n 6 "$RUNLOG" 2>/dev/null | sed 's/^/    /'
-  cat <<EOF
-
-  Things to check (no experience needed — go top to bottom):
-    • Is the Pi online? It must reach the internet to find the AXIOM network.
-    • Is the Pi on the SAME home network as the mesh? The public addresses may not
-      loop back — edit  $DATA_DIR/bootstrap.toml  to use the mesh box's LAN IP.
-    • Full log is here:  $RUNLOG
-  The node has been stopped. Fix the above and re-run the installer to try again.
+  if [ "$failed" = 1 ]; then
+    cat <<EOF
+  It reached a mesh node? No — it couldn't get a network identity (NBC), which
+  means it couldn't reach any bootstrap peer. Most common causes:
+    • Same LAN as the mesh: re-run pointing at the mesh box's LAN IP —
+        AXIOM_BOOTSTRAP=<mesh-ip>  curl -fsSL .../install-nabla.sh | bash
+    • Public join: the seed addresses must be reachable from this network.
 EOF
+  else
+    echo "  See the full log for details."
+  fi
+  echo "  Full log:  $RUNLOG"
+  echo "  The node has been stopped. Fix the above and re-run to try again."
   kill "$NPID" 2>/dev/null || true
   exit 1
 fi
