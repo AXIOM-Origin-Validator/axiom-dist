@@ -367,6 +367,18 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Abandon an outstanding interrupted redeem (§14 — user-initiated only).
+     * The guard must not be a terminal state: a wallet is unrecoverable ONLY
+     * if BANNED. Value-safe (the cheque stays redeemable); forfeits only the
+     * adoption bookkeeping, so the UI offers it strictly as the last resort.
+     */
+    discardPendingRedeem() {
+        const ret = wasm.wallet_discardPendingRedeem(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Discard the paused send (the receiver declined, or the user gave up).
      * Non-destructive: nothing was ever witnessed for the paused txid.
      */
@@ -532,6 +544,30 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[1]);
         }
         return Wallet.__wrap(ret[0]);
+    }
+    /**
+     * The cheque id of an outstanding interrupted redeem, or null (YP-SDK
+     * §4.6a). While set, send() refuses and redeem() accepts ONLY this cheque
+     * — the retry IS the recovery. Surfaced so the UI can name the blocking
+     * cheque instead of showing an opaque refusal.
+     *
+     * NOTE (phase-2 dependency): the browser's RedeemMachine does not yet
+     * WRITE this marker on a no-chain failure — the receive-half lands with
+     * the machine rebuild. Until then this reads markers written by a shared
+     * native wallet, and diagnose() carries the same fact as an action.
+     * @returns {string | undefined}
+     */
+    pendingRedeemChequeId() {
+        const ret = wasm.wallet_pendingRedeemChequeId(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
     }
     /**
      * The interrupted-but-resumable send round on this wallet, if one is still
@@ -1470,7 +1506,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1492,7 +1528,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1617,8 +1653,8 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 272, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 262, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1662,15 +1698,15 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447(arg0, arg1, arg2) {
-    const ret = wasm.wasm_bindgen__convert__closures_____invoke__h0f8a40f3c2872447(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
 }
 
-function wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(arg0, arg1, arg2, arg3) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h74f773d399a8a313(arg0, arg1, arg2, arg3);
+function wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3);
 }
 
 const WalletFinalization = (typeof FinalizationRegistry === 'undefined')
