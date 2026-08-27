@@ -46,6 +46,27 @@ curl -sL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/mai
 Removing a node never harms the mesh: your node's state is a replica and the
 network routes around departed nodes automatically.
 
+## Backup & Restore / Migration
+
+**Backup** (one line — writes `./axiom-backup-<host>-<stamp>.tar.gz`; keys +
+config + state, hot-safe; add `-s -- --cold` for a stop-snapshot-restart):
+
+```bash
+curl -sL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/main/backup.sh | bash
+```
+
+**Restore / migrate to another machine:**
+
+```bash
+curl -sL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/main/restore.sh | bash -s -- axiom-backup-<host>-<stamp>.tar.gz
+```
+
+> ⚠ **One identity, one machine.** Never run the same node identity in two
+> places at once. Migration order: uninstall (or stop) on the old machine →
+> install binaries on the new one → restore the backup there. The node
+> resyncs any missing state from the mesh automatically; the tarball is your
+> identity — store it like a private key.
+
 ## Update
 
 Same command — always gets the latest build:
