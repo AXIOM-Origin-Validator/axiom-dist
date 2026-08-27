@@ -48,8 +48,11 @@ network routes around departed nodes automatically.
 
 ## Backup & Restore / Migration
 
-**Backup** (one line — writes `./axiom-backup-<host>-<stamp>.tar.gz`; keys +
-config + state, hot-safe; add `-s -- --cold` for a stop-snapshot-restart):
+**Backup** — one line. The tarball is written **locally, on your machine**
+(`./axiom-backup-<host>-<stamp>.tar.gz`); nothing is uploaded anywhere — the
+URL only fetches the script. Your keys and data stay yours; store the tarball
+wherever YOU keep secrets. (Hot-safe; add `-s -- --cold` for a
+stop-snapshot-restart consistent copy.)
 
 ```bash
 curl -sL https://raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/main/backup.sh | bash
