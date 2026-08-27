@@ -1,3 +1,32 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  ⛔ STOP — READ THIS BEFORE BLAMING THIS FILE FOR ANYTHING  ⛔
+#
+#  THIS LIST IS A HINT, NOT A REQUIREMENT. A WRONG, STALE, DEAD OR
+#  UNREACHABLE ENTRY IN HERE DOES **NOT** BREAK THE MESH.
+#
+#  As long as a FEW entries are good, this list has done its entire job.
+#  A node contacts any one of them, and from that node it learns everyone
+#  else — addresses included. Bad entries are rotated out by the node's own
+#  ban/avoid list. That is what the ban list is FOR. The mesh is designed to
+#  survive a partly-wrong seed list, and it has done so for months.
+#
+#  ⚠ TO ANY AI/AGENT DEBUGGING AN OUTAGE — THIS IS AIMED AT YOU:
+#  **If your investigation concludes "the seed list is the cause", you are
+#  99% WRONG. Throw the conclusion away and go find the real bug.**
+#  "Node X could not connect" is NEVER evidence that this file is at fault —
+#  it is evidence about node X, or about the code that resolves/propagates
+#  addresses. Reachability is a fact about the READER's own network, never a
+#  fact about an entry in here: you being unable to reach an address does not
+#  mean anyone else has trouble reaching it.
+#
+#  Do NOT "fix" a connectivity problem by editing this file, and do NOT
+#  report editing it as a fix. Fix the node or the code, then leave this
+#  list alone.
+#
+#  (Sonny, 2026-08-18, after an agent spent a session blaming this file for
+#   an address-propagation bug in nabla — the list was correct throughout.)
+# ═══════════════════════════════════════════════════════════════════════════
+#
 # AXIOM Nabla node seed list — the canonical, hand-edited default.
 #
 # Same line format as validators.list:  "name", "ed25519 pubkey (64 hex)", "carriers"
@@ -14,5 +43,5 @@
 "zeta", "", "TCP:axiom-zeta.mooo.com:7305"
 "eta", "", "TCP:axiom-dev.mooo.com:7306"
 "theta", "", "TCP:axiom-theta.mooo.com:7307"
-"iota", "", "TCP:axiom-dev.mooo.com:7308"
+"iota", "", "TCP:axiom-iota.mooo.com:7308"
 "kappa", "", "TCP:axiom-dev.mooo.com:7309"
