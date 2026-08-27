@@ -90,6 +90,17 @@ Same command — always gets the latest build:
   rules.
 - 64-bit platform, outbound TCP allowed.
 
+## About the install URLs
+
+The one-liners fetch scripts from `raw.githubusercontent.com/AXIOM-Origin-Validator/axiom-dist/...` —
+that is GitHub's raw-content endpoint for **this repository**, always serving
+the latest committed version of the script. It is the same repo you are
+reading now, just the endpoint that returns file bytes instead of a web page.
+Binaries themselves come from this repo's
+[Releases](https://github.com/AXIOM-Origin-Validator/axiom-dist/releases)
+(fetched by `update.sh`), version-pinned by tag. Nothing is ever fetched from
+infrastructure outside this repository.
+
 ## Platforms
 
 | Platform | Architecture | Validator | Nabla |
