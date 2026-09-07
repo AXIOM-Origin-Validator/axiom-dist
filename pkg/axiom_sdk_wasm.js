@@ -170,9 +170,6 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[0]);
         }
     }
-    /**
-     * Persist and release the lock. The handle becomes unusable afterwards.
-     */
     close() {
         const ret = wasm.wallet_close(this.__wbg_ptr);
         if (ret[1]) {
@@ -773,6 +770,35 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Persist and release the lock. The handle becomes unusable afterwards.
+     * §5.2.3 — arm a SUBSIDY STAKE CLAIM for the next genesis claim.
+     *
+     * `tier`: **2 = Foundation**, **3 = Bootstrap**, **0 = an ordinary genesis
+     * airdrop** (the default, and what every normal wallet uses).
+     *
+     * ⚠ **THE WALLET CLIENT IS A WALLET CLIENT** (Sonny, 2026-09-07). This does
+     * NOT make the wallet a validator and touches no validator machinery: there
+     * is no certificate request here and none is possible from a browser. It
+     * arms the CLAIM only. An operator claims the stake in their wallet, then
+     * copies that wallet to the validator box — the binding happens there.
+     *
+     * What the claim does: credits the tier's stake amount from the pool and
+     * STAMPS THE LOCK. The money arrives and then cannot move — the wallet can
+     * still RECEIVE, but cannot send or redeem until the deadline passes
+     * (§5.2.2c, proven live 2026-09-06/07). Show the user that before they
+     * confirm; it is not reversible and it is not a normal airdrop.
+     *
+     * Cleared with `tier = 0`. Core rejects a tier that disagrees with the claim
+     * amount, so a stale value cannot silently draw from the wrong pool.
+     * @param {number} tier
+     */
+    setStakeClaimTier(tier) {
+        const ret = wasm.wallet_setStakeClaimTier(this.__wbg_ptr, tier);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Sign an arbitrary message with the wallet's Ed25519 key.
      * Returns 64-byte signature.
      * @param {Uint8Array} message
@@ -788,6 +814,34 @@ export class Wallet {
         var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v2;
+    }
+    /**
+     * The subsidy tier currently armed (0 = none). Lets the UI show what a
+     * confirm button is about to do.
+     * @returns {number}
+     */
+    stakeClaimTier() {
+        const ret = wasm.wallet_stakeClaimTier(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0];
+    }
+    /**
+     * The stake lock, for display: `{ hibernationUntil, wallClockLock, locked }`.
+     *
+     * `locked` is what a UI should gate on. `hibernationUntil` is THE deadline
+     * (Core enforces it against the attested tick and it is always the later of
+     * the two); `wallClockLock` is its human-readable face — a calendar date an
+     * operator can actually read, which is the whole reason it exists.
+     * @returns {any}
+     */
+    stakeLock() {
+        const ret = wasm.wallet_stakeLock(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Stash a send's serde-CBOR transaction (the `sendTxCbor` field
@@ -990,6 +1044,7 @@ export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, c
  * @param {bigint} current_balance
  * @param {bigint} wallet_seq
  * @param {bigint} current_hibernation
+ * @param {bigint} current_wall_clock_lock
  * @param {Uint8Array} state_id
  * @param {Uint8Array | null | undefined} cheque_claim_proof
  * @param {Uint8Array | null | undefined} txid_attestation
@@ -998,7 +1053,7 @@ export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, c
  * @param {Uint8Array | null} [oods_attestation]
  * @returns {Uint8Array}
  */
-export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, current_hibernation, state_id, cheque_claim_proof, txid_attestation, client_private_key, now, oods_attestation) {
+export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, current_hibernation, current_wall_clock_lock, state_id, cheque_claim_proof, txid_attestation, client_private_key, now, oods_attestation) {
     const ptr0 = passArray8ToWasm0(receiver_pk, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(cheque_bundle, wasm.__wbindgen_malloc);
@@ -1013,7 +1068,7 @@ export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, 
     const len5 = WASM_VECTOR_LEN;
     var ptr6 = isLikeNone(oods_attestation) ? 0 : passArray8ToWasm0(oods_attestation, wasm.__wbindgen_malloc);
     var len6 = WASM_VECTOR_LEN;
-    const ret = wasm.cl5Run(ptr0, len0, ptr1, len1, current_balance, wallet_seq, current_hibernation, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, now, ptr6, len6);
+    const ret = wasm.cl5Run(ptr0, len0, ptr1, len1, current_balance, wallet_seq, current_hibernation, current_wall_clock_lock, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, now, ptr6, len6);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
@@ -1653,7 +1708,7 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 262, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 266, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8);
             return ret;
         },

@@ -222,6 +222,7 @@
       <button class="tab" data-tab="receive">Receive</button>
       <button class="tab" data-tab="history">History</button>
       <button class="tab" data-tab="proof">Proof</button>
+      <button class="tab" data-tab="validator">Validator</button>
     </div>
 
     <!-- Overview tab -->
@@ -410,6 +411,75 @@
       </div>
     </div>
 
+    <!-- Validator tab — SPECIAL FEATURES. A wallet client stays a wallet
+         client: this claims a stake INTO THIS WALLET and does nothing to any
+         validator. The operator copies the wallet to the validator afterwards. -->
+    <div id="tab-validator" class="hidden">
+      <div class="card">
+        <h2>Claim a validator stake</h2>
+        <p class="muted" style="margin:.1rem 0 .7rem">
+          This is a <b>special feature</b>. It claims a validator stake into
+          <b>this wallet</b> from a subsidy pool. It does not set up, contact or
+          register a validator — you claim here, then copy this wallet to your
+          validator machine.
+        </p>
+
+        <div id="v-lockbanner" class="hidden" style="margin:0 0 .8rem; padding:.6rem .7rem; border:1px solid #6b4a12; background:#2a1f0c; border-radius:9px">
+          <b>This wallet is stake-locked.</b>
+          <div class="muted" id="v-lockdetail" style="margin-top:.25rem"></div>
+        </div>
+
+        <div id="v-choices">
+          <div style="margin-bottom:.6rem">
+            <b>Bootstrap</b> — claims <b>505 AXC</b>
+            <div class="muted">Community tier. Stake floor 500 AXC; the extra 5 covers fees.</div>
+          </div>
+          <div style="margin-bottom:.6rem">
+            <b>Foundation</b> — claims <b>505,000 AXC</b>
+            <div class="muted">Foundation tier. Stake floor 500,000 AXC; the extra 5,000 covers fees.</div>
+          </div>
+        </div>
+
+        <div style="margin:.8rem 0; padding:.6rem .7rem; border:1px solid var(--line); border-radius:9px">
+          <b>Read this before you claim.</b>
+          <ul class="muted" style="margin:.35rem 0 0; padding-left:1.1rem; line-height:1.5">
+            <li>The stake <b>arrives in this wallet and is then locked</b>. You keep it; you cannot move it.</li>
+            <li>While locked the wallet <b>can still receive</b>, but <b>cannot send or redeem</b>.</li>
+            <li>The lock ends <b>by time only</b>. There is no unlock step and nobody can release it early — after the deadline your next send simply works.</li>
+            <li>A claim is <b>not reversible</b>. This is not the ordinary airdrop.</li>
+          </ul>
+        </div>
+
+        <div style="margin:.8rem 0 0; padding:.6rem .7rem; border:1px solid #6b4a12; background:#2a1f0c; border-radius:9px">
+          <b>The claim itself runs on your validator, not here.</b>
+          <div class="muted" style="margin-top:.35rem; line-height:1.5">
+            A stake claim requires a validator certificate, and Core refuses one
+            without it (<code>ValidatorJoinNoProvisionalVbc</code>) — that gate is
+            what stops an ordinary wallet drawing from the pools. Obtaining a
+            certificate is a validator operation, and this is a wallet.
+            <br><br>
+            So the order is: <b>export this wallet → copy it to the validator
+            machine → claim there</b>. The stake then lives in this wallet, locked,
+            exactly as described above.
+          </div>
+        </div>
+        <pre id="v-out" class="muted" style="margin:.8rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Move this wallet to your validator</h2>
+        <p class="muted" style="margin:.1rem 0 .7rem">
+          The stake lives in this wallet, so the validator needs <b>this wallet file</b>.
+          Export it, copy it to the validator machine, and keep the passphrase —
+          the file is encrypted and useless without it.
+        </p>
+        <button id="v-export" class="ghost" style="width:100%">Export wallet file</button>
+        <p class="muted" style="margin:.6rem 0 0">
+          Anyone holding this file <i>and</i> its passphrase controls the stake. Treat it like the key it is.
+        </p>
+      </div>
+    </div>
+
     <div class="row" style="margin-top:.5rem">
       <button id="ov-refresh" class="ghost">Refresh</button>
       <button id="ov-lock" class="ghost">Lock</button>
@@ -499,7 +569,7 @@ const PARENT = 'axiom';
 const $ = id => document.getElementById(id);
 const show = (...ids) => ['boot','onboard','unlock','main'].forEach(s => $(s).classList.toggle('hidden', !ids.includes(s)));
 function tab(name) {
-  ['overview','send','receive','history','proof'].forEach(t => $('tab-'+t).classList.toggle('hidden', t!==name));
+  ['overview','send','receive','history','proof','validator'].forEach(t => $('tab-'+t).classList.toggle('hidden', t!==name));
   document.querySelectorAll('.nav .tab').forEach(b => b.classList.toggle('active', b.dataset.tab===name));
   if (name==='receive' && wallet) {
     // Dev mail connection card only applies to @axiom.internal dev wallets.
@@ -507,6 +577,7 @@ function tab(name) {
     $('r-devmail-card').style.display = isDev ? '' : 'none';
   }
   if (name==='history' && wallet) renderHistory();
+  if (name==='validator' && wallet) renderValidatorTab();
 }
 // Self-send recovery types carry no counterparty value (heal + the two
 // YPX-020 HAL kinds). Friendly labels for the raw TxType debug strings.
@@ -1688,14 +1759,23 @@ async function withReceivePump(host, fn) {
 // pull the self-send cheque (TOT→FATMAMA) → CL5 redeem. The recv poll loop
 // runs the kiddo cycle (strips email → raw CBOR) + wallet.recv() until a
 // k-ready bundle appears, then redeems it.
-$('ov-claim').onclick = async () => {
+// ── ONE claim flow, parameterised (2026-09-07) ─────────────────────────────
+// The Overview button and the Validator tab both run THIS. The validator
+// claim differs only in the AMOUNT and the armed TIER — everything else
+// (auth gate, FATMAMA register, witness round, cheque wait, redeem) is
+// identical, and a second copy in JS would drift exactly like a second copy
+// in Rust. `tier`: 0 = ordinary airdrop, 2 = Foundation, 3 = Bootstrap.
+async function runGenesisClaim({ amountAtoms, tier = 0, btn, out, authReason }) {
   if (!wallet) return;
   if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
-  if (!(await askKey('claim dev funds'))) return;   // re-auth gate
-  const btn = $('ov-claim'), out = $('c-out');
+  if (!(await askKey(authReason || 'claim dev funds'))) return;   // re-auth gate
   const host = ($('c-host').value.trim() || 'axiom-dev.mooo.com').replace(/:\d+$/, '');
   const log = m => { out.textContent += m + '\n'; };
   btn.disabled = true; out.textContent = '';
+  // §5.2.3 — arm the subsidy tier BEFORE the round. It must reach the
+  // fact-confirm leg or the pool grant silently no-ops while the transaction
+  // succeeds (the failure `fact_confirm.rs` predicted for this exact path).
+  try { wallet.setStakeClaimTier(tier); } catch (e) { log('could not arm tier: ' + e); btn.disabled = false; return; }
   showProg('Claiming dev funds…');
   try {
     const name = wallet.info().name;
@@ -1722,7 +1802,7 @@ $('ov-claim').onclick = async () => {
     // The receive pump drains FATMAMA into the inbox throughout, so the
     // witness rounds (and the cheque) actually arrive.
     const r = await withReceivePump(host, async () => {
-      const claimRes = await claimGenesis(wallet, witnessTr, { ...common, amount: atomsPerAxc(), reference: 'sdk', offeredFee: 100n }, stepProgress('Fund'));
+      const claimRes = await claimGenesis(wallet, witnessTr, { ...common, amount: amountAtoms, reference: tier ? 'stake-claim' : 'sdk', offeredFee: 100n }, stepProgress('Fund'));
       log(`  txid ${String(claimRes.txid).slice(0, 16)}…  registered=${claimRes.registered}`);
       renderOverview();
 
@@ -1749,7 +1829,92 @@ $('ov-claim').onclick = async () => {
     btn.disabled = false;
     hideProg();
   }
+}
+
+// ── Validator tab — SPECIAL FEATURES (informational) ──────────────────────
+//
+// A wallet client stays a wallet client (Sonny, 2026-09-07). This tab explains
+// the validator stake and hands the operator their wallet; it does NOT claim.
+//
+// ⚠ WHY IT DOES NOT CLAIM, measured rather than assumed. A browser claim was
+// built and driven end to end on 2026-09-07. Core refused it with
+// `ValidatorJoinNoProvisionalVbc`: a subsidy claim requires a validator
+// CERTIFICATE first (§5.2.2b), which is the gate that stops an ordinary wallet
+// drawing from the pools. Obtaining a certificate is a validator operation, so a
+// wallet cannot complete a claim by construction — not a defect, the gate doing
+// its job. Leaving a Claim button here would walk a user through an
+// irreversible-sounding confirm into a protocol rejection.
+//
+// (The SDK work behind that attempt was still needed and is kept: the tier ->
+// TxKind mapping was a real defect — the browser driver had never made a
+// subsidy claim, so nothing had exercised it. The "CL1 discriminator fix" it
+// also produced is GONE: on 2026-09-07 the canonical encoder stopped
+// decomposing `kind` into `is_*` bools, so there are no discriminators for a
+// builder to get wrong. That is the actual fix; the one this comment used to
+// name was the symptom.)
+
+function renderValidatorTab() {
+  if (!wallet) return;
+  let lock = { locked: false, hibernationUntil: 0, wallClockLock: 0 };
+  try { lock = wallet.stakeLock(); } catch (_) {}
+  const banner = $('v-lockbanner'), detail = $('v-lockdetail');
+  if (!banner || !detail) return;
+
+  if (lock.locked) {
+    banner.classList.remove('hidden');
+    const wcl = Number(lock.wallClockLock) * 1000;
+    detail.innerHTML =
+      'A stake is claimed and locked in this wallet. You can still '
+      + '<b>receive</b>, but cannot send or redeem until the lock ends.<br>'
+      + 'Readable deadline: <b>' + (wcl ? new Date(wcl).toLocaleString() : 'unknown') + '</b>'
+      + '<div class="muted" style="margin-top:.3rem">The deadline the protocol enforces is a '
+      + 'tick count, not a clock; the date above is its readable face. There is no unlock '
+      + 'step — after it passes, your next send simply works.</div>';
+  } else {
+    banner.classList.add('hidden');
+  }
+}
+
+$('v-export').onclick = () => {
+  // Export every stored byte for this wallet. There was no export in this app,
+  // and an earlier draft of this button delegated to a Settings button that does
+  // not exist — i.e. it would have LOOKED like an export and done nothing. So it
+  // is implemented here instead of pretending.
+  //
+  // ⚠ The bytes are exported EXACTLY AS STORED, which means the keystore stays
+  // VAULT-ENCRYPTED: the file is useless without the passphrase, which is what
+  // the card above promises. Do not "helpfully" decrypt on the way out.
+  if (!wallet) return;
+  const dump = {};
+  let n = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith(FS)) continue;
+    dump[k.slice(FS.length)] = localStorage.getItem(k);
+    n++;
+  }
+  if (!n) { setMsg('nothing stored to export', 'err'); return; }
+  const payload = {
+    axiom_wallet_export: 1,
+    exported_at: new Date().toISOString(),
+    note: 'Encrypted as stored. Copy to the validator machine; the passphrase is required.',
+    email: (wallet.info && wallet.info().email) || null,
+    files: dump,
+  };
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `axiom-wallet-${(payload.email || 'wallet').replace(/[^a-z0-9]+/gi, '_')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setMsg(`exported ${n} file(s) — still encrypted, keep the passphrase`, 'ok');
 };
+
+$('ov-claim').onclick = () => runGenesisClaim({
+  amountAtoms: atomsPerAxc(), tier: 0,
+  btn: $('ov-claim'), out: $('c-out'), authReason: 'claim dev funds',
+});
 
 $('ov-refresh').onclick = () => { renderOverview(); toast('refreshed'); };
 $('h-refresh').onclick = () => { renderHistory(); toast('refreshed'); };

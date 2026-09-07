@@ -35,7 +35,10 @@ self.onmessage = async (e) => {
       // (HAL/RECALL completion) redeem's CL5 must include the reading or
       // the proof's input_hash mismatches the envelope Lambda recomputes.
       proof = cl5Run(m.receiverPk, m.chequeBundle, BigInt(m.balance), BigInt(m.walletSeq),
-                     BigInt(m.currentHibernation || 0), m.stateId,
+                     BigInt(m.currentHibernation || 0),
+                     // §5.2.2c slot 6 — the stake lock; CL5 refuses a redeem
+                     // while it is held (KI#133).
+                     BigInt(m.currentWallClockLock || 0), m.stateId,
                      m.chequeClaimProof || undefined, m.txidAttestation || undefined, m.privateKey, m.now,
                      m.oodsAttestation || undefined);
     } else {
