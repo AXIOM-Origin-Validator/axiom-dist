@@ -182,7 +182,7 @@
 
     <div style="margin:1.1rem 0 .3rem;border-top:1px solid #2a2f3a;padding-top:.9rem"></div>
     <label>Or import a wallet backup</label>
-    <p class="muted" style="margin:.1rem 0 .5rem">Bring a wallet over from the desktop wallet or another browser. On the source, export an <b>encrypted backup</b> (Mac: <b>Wallets → Export</b> → a <code>wallet.axpw</code> file), choose it here, and reuse the <b>Name</b> + <b>Wallet key</b> fields above — the key must be the one the wallet was exported with. The backup is decrypted with that key and re-encrypted at rest in this browser under it (dev passcode + confirm-key don't apply to import).</p>
+    <p class="muted" style="margin:.1rem 0 .5rem">Bring a wallet over from <b>a validator</b>, the desktop wallet, or another browser. Accepted: a validator's <code>wallet.axiom</code> (copy the file straight across — this is how a wallet comes back after a stake claim), or an <b>encrypted backup</b> (Mac: <b>Wallets → Export</b> → <code>wallet.axpw</code>). Choose the file here and reuse the <b>Name</b> + <b>Wallet key</b> fields above — the key must be the one the wallet uses. It is re-encrypted at rest in this browser under that key (dev passcode + confirm-key don't apply to import).</p>
     <input type="file" id="o-import-file" accept=".axpw,.axiom,application/octet-stream" />
     <div style="margin-top:.6rem" class="row"><button id="o-import" class="ghost">Import wallet</button></div>
   </div>
@@ -199,6 +199,16 @@
       <button id="u-forget" class="ghost">Forget</button>
     </div>
     <div style="margin-top:.6rem"><button id="u-new" class="ghost" style="width:100%">＋ Create a different wallet</button></div>
+    <!-- ⚠ IMPORT LIVES ON THE LOGIN SCREEN BY DESIGN (Sonny, 2026-09-07):
+         "the webclient shouldnt be support two wallets at the same time ... to
+         working on a validator wallet, it is required to logout first that make
+         total sense". One wallet open at a time, so SWITCHING wallets — including
+         bringing one back from a validator — is a logout-then-choose action, and
+         this is where you choose. It used to be reachable ONLY by pressing
+         "Create a different wallet" and scrolling past the whole creation form,
+         which is why the Validator tab's export→claim→return journey had no
+         signposted way back. -->
+    <div style="margin-top:.6rem"><button id="u-import" class="ghost" style="width:100%">⤓ Import a wallet (from a validator or another device)</button></div>
   </div>
 
   <!-- Main app (wallet open) -->
@@ -393,6 +403,22 @@
         </select>
         <div id="r-check-mode-note" class="muted" style="font-size:10px; margin:-.2rem 0 .6rem"></div>
         <div style="margin-top:.2rem"><button id="r-refresh" style="width:100%">Check for cheques</button></div>
+
+        <!-- ⚠ MANUAL INTAKE. A browser cannot fetch its own mail (raw TCP and
+             provider TLS are both out of reach), so anything mailed to this
+             wallet has to be brought in by hand. Two ways, because the operator
+             may not be able to produce a FILE — webmail, a remote session, or a
+             client that only shows the payload inline. Both end in the same
+             place: the bytes are written where "Check for cheques" already
+             looks, so nothing downstream changes. -->
+        <div style="margin-top:1.1rem;border-top:1px solid #2a2f3a;padding-top:.9rem"></div>
+        <label>Bring in something that arrived by mail</label>
+        <p class="muted" style="margin:.1rem 0 .5rem">Anything mailed to this wallet — a <b>cheque</b>, a payment, or a <b>validator certificate</b> — arrives at your mailbox, and a web page cannot read one. Save the message from your mail client and choose it here, or paste its contents. Then press <b>Check for cheques</b>.</p>
+        <input type="file" id="r-intake-file" accept=".eml,.cbor,.txt,message/rfc822,application/octet-stream" multiple />
+        <p class="muted" style="margin:.5rem 0 .25rem">…or paste the message (or just its base64 body):</p>
+        <textarea id="r-intake-text" rows="4" placeholder="From: …&#10;Subject: AXIOM/…&#10;&#10;o2ZhbW91bnQa…" style="width:100%;font:11px ui-monospace,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:.5rem"></textarea>
+        <div style="margin-top:.5rem" class="row"><button id="r-intake" class="ghost" style="width:100%">Take it in</button></div>
+        <pre id="r-intake-out" class="muted" style="margin:.6rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
         <div id="r-cheques" class="muted" style="margin-top:.7rem">None yet.</div>
       </div>
       <!-- TEST-ONLY receive stub. Empty by default; a published build must
@@ -486,12 +512,17 @@
           <div class="muted" style="margin-top:.35rem; line-height:1.5">
             A stake claim requires a validator certificate, and Core refuses one
             without it (<code>ValidatorJoinNoProvisionalVbc</code>) — that gate is
-            what stops an ordinary wallet drawing from the pools. Obtaining a
-            certificate is a validator operation, and this is a wallet.
+            what stops an ordinary wallet drawing from the pools.
+            <br><br>
+            The reason the claim does not run here is <b>delivery, not permission</b>:
+            the claim's cheque is <b>mailed</b> to your wallet, and a browser cannot
+            read a mailbox. The claim would be sent and the money never collected.
             <br><br>
             So the order is: <b>export this wallet → copy it to the validator
             machine → claim there</b>. The stake then lives in this wallet, locked,
-            exactly as described above.
+            exactly as described above. To bring it back afterwards: <b>log out</b>,
+            then <b>Import a wallet</b> on the login screen and choose the
+            validator's <code>wallet.axiom</code> — the stake and its lock come with it.
           </div>
         </div>
         <pre id="v-out" class="muted" style="margin:.8rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
@@ -1253,6 +1284,15 @@ $('u-open').onclick = async () => {
   }
 };
 $('u-new').onclick = () => { setMsg(''); $('o-key').value=''; $('o-key2').value=''; show('onboard'); $('o-name').focus(); };
+// Same screen, but land the user ON the import controls rather than at the top
+// of a creation form they do not want to fill in.
+$('u-import').onclick = () => {
+  setMsg(''); $('o-key').value=''; $('o-key2').value='';
+  show('onboard');
+  const f = $('o-import-file');
+  if (f) { f.scrollIntoView({ block: 'center' }); }
+  $('o-name').focus();
+};
 // Wipe every axfs key for axiom/<name>/... + the last-wallet pointer.
 // Browser-local only — there is no on-chain wallet delete.
 function forgetWallet(name) {
@@ -1810,6 +1850,98 @@ async function receiveCycle() {
   await refreshScarConsents();
   renderCheques(wallet.recv(`${PARENT}/${wallet.info().name}/maildir`) || []);
 }
+// ── MANUAL MAIL INTAKE (file or paste) ─────────────────────────────────────
+//
+// ⚠ WHY THIS EXISTS. Everything mailed to this wallet — a cheque from a claim,
+// a payment from someone else — is delivered by the validator's outbound
+// carrier to a real mailbox. A browser cannot read one (no raw TCP, no TLS
+// stack it can point at a provider), so without this control the money is sent
+// and never collected. See the banner at the cheque dispatch in
+// antie/src/gateway.rs for why that delivery is correct and not a defect.
+//
+// BOTH SOURCES END IN THE SAME PLACE: the raw CBOR is written under the
+// wallet's `…/maildir/inbox/new/` key prefix — which is a KEY, not a folder
+// (the storage shim is a flat localStorage map, `mkdirP` is a no-op). "Check
+// for cheques" already scans exactly that, so nothing downstream changes.
+//
+// ⚠ A VBC ARRIVES BY THIS SAME PATH. Its issuer signature rides on the
+// WitnessResponse, and for a mail-carrier client that response is MAILED and
+// drained into this same inbox — identical bytes, identical destination. An
+// earlier version of this comment claimed a VBC "cannot come in this way"
+// because signatures live at `{wallet.dir()}/pending_round/vbc_sigs.cbor`; that
+// confused where they are KEPT AFTER EXTRACTION with how they ARRIVE. Corrected
+// 2026-09-07 (Sonny: "VBC is still with the mail path").
+//
+// The assembly logic is in the SHARED layer and is reachable from here —
+// `sdk/core/src/validator_join.rs` (`VbcIssuerSignature`, `collected`,
+// `assemble`). What is missing is only a wasm BINDING to drive it: `sdk/wasm`
+// exposes no VBC surface today, so the bytes can land but nothing in the browser
+// yet turns three of them into a certificate. That is a binding to add, NOT a
+// second intake path — do not build one.
+function intakeBytesToCbor(raw) {
+  // A saved mail file is the carrier-wrapped form kiddo.js already parses; a
+  // bare paste may be just the base64 body, or raw CBOR. Try in that order.
+  const cbor = stripEmailToCbor(raw);
+  if (cbor) return cbor;
+  // bare base64?
+  try {
+    let t = '';
+    for (let i = 0; i < raw.length; i++) t += String.fromCharCode(raw[i]);
+    const compact = t.replace(/\s+/g, '');
+    if (compact && /^[A-Za-z0-9+/=]+$/.test(compact)) {
+      const bin = atob(compact);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+  } catch (_) { /* fall through */ }
+  // raw CBOR? a cheque bundle is a CBOR map/array — cheap shape check only.
+  if (raw.length > 8 && (raw[0] & 0xe0) >= 0x80) return raw;
+  return null;
+}
+
+function landInInbox(cbor, n) {
+  const uuid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2);
+  const name = `${(Date.now() / 1000).toFixed(6)}.${n}.in.${uuid}`;
+  storage.writeAtomic(`${PARENT}/${wallet.info().name}/maildir/inbox/new/${name}`, cbor);
+}
+
+$('r-intake').onclick = async () => {
+  if (!wallet) return;
+  const out = $('r-intake-out'); out.textContent = '';
+  const files = Array.from($('r-intake-file').files || []);
+  const pasted = ($('r-intake-text').value || '').trim();
+  if (!files.length && !pasted) {
+    out.textContent = 'Choose a file or paste a message first.'; return;
+  }
+  const btn = $('r-intake'); btn.disabled = true; btn.textContent = 'Taking in…';
+  let landed = 0; const bad = [];
+  try {
+    for (const f of files) {
+      const raw = new Uint8Array(await f.arrayBuffer());
+      const cbor = intakeBytesToCbor(raw);
+      if (cbor) { landInInbox(cbor, landed); landed++; }
+      else bad.push(f.name);
+    }
+    if (pasted) {
+      const cbor = intakeBytesToCbor(new TextEncoder().encode(pasted));
+      if (cbor) { landInInbox(cbor, landed); landed++; }
+      else bad.push('pasted text');
+    }
+    // Say what happened in the operator's terms, and NEVER claim success on a
+    // partial: a message that did not parse is money that has not arrived.
+    const lines = [];
+    if (landed) lines.push(`✓ took in ${landed} item(s) — now press "Check for cheques".`);
+    if (bad.length) lines.push(`✗ could not read: ${bad.join(', ')}\n   Expected a saved mail message, its base64 body, or raw CBOR.`);
+    out.textContent = lines.join('\n');
+    if (landed) { $('r-intake-text').value = ''; $('r-intake-file').value = ''; }
+  } catch (e) {
+    out.textContent = 'Intake failed — ' + errOf(e);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Take it in';
+  }
+};
+
 $('r-refresh').onclick = async () => {
   if (!wallet) return;
   const btn = $('r-refresh'); btn.disabled = true; btn.textContent = 'Pulling…'; setMsg('');
@@ -2062,10 +2194,23 @@ async function runGenesisClaim({ amountAtoms, tier = 0, btn, out, authReason }) 
 // built and driven end to end on 2026-09-07. Core refused it with
 // `ValidatorJoinNoProvisionalVbc`: a subsidy claim requires a validator
 // CERTIFICATE first (§5.2.2b), which is the gate that stops an ordinary wallet
-// drawing from the pools. Obtaining a certificate is a validator operation, so a
-// wallet cannot complete a claim by construction — not a defect, the gate doing
-// its job. Leaving a Claim button here would walk a user through an
-// irreversible-sounding confirm into a protocol rejection.
+// drawing from the pools.
+//
+// ⚠ CORRECTED 2026-09-07. This used to say "obtaining a certificate is a
+// validator operation, so a wallet cannot complete a claim by construction".
+// **The protocol contradicts that**: a VBC request is `TxKind::VbcRequest`, "an
+// ORDINARY transaction in every respect ... the ONLY difference is what the k=3
+// witnesses return: a certificate signed via CL8 instead of a value cheque"
+// (core/logic/src/types.rs §5.2.2d), and the certificate comes back on the
+// WitnessResponse as `vbc_signature`, "returned WHERE A CHEQUE WOULD GO" — i.e.
+// as a REPLY, which the held /session leg already carries. A wallet may request
+// one; a provisional VBC exists precisely so an unstaked candidate key can.
+//
+// The REAL reason the claim does not run here is DELIVERY: the claim's cheque is
+// MAILED to the wallet, and a browser cannot read a mailbox (see the banner at
+// the cheque dispatch in antie/src/gateway.rs). Sending would work; collecting
+// would not. Leaving a Claim button here would walk a user through an
+// irreversible-sounding confirm into a claim whose money never arrives.
 //
 // (The SDK work behind that attempt was still needed and is kept: the tier ->
 // TxKind mapping was a real defect — the browser driver had never made a
