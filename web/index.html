@@ -414,6 +414,7 @@
         <div style="margin-top:1.1rem;border-top:1px solid #2a2f3a;padding-top:.9rem"></div>
         <label>Bring in something that arrived by mail</label>
         <p class="muted" style="margin:.1rem 0 .5rem">Anything mailed to this wallet — a <b>cheque</b>, a payment, or a <b>validator certificate</b> — arrives at your mailbox, and a web page cannot read one. Save the message from your mail client and choose it here, or paste its contents. Then press <b>Check for cheques</b>.</p>
+        <p class="muted" style="margin:.25rem 0 .35rem">Accepted: <code>.eml</code> (a saved mail message — in most clients <b>File → Save As</b>, or drag the message to your desktop), or a <code>.txt</code>/<code>.cbor</code> file holding just the message body. You can select several at once — one round sends three.<br>⚠ Outlook's <code>.msg</code> is <b>not</b> a mail message, it is Outlook's own binary format; use <b>Save as → Text only</b> or forward the mail to a client that can save <code>.eml</code>.</p>
         <input type="file" id="r-intake-file" accept=".eml,.cbor,.txt,message/rfc822,application/octet-stream" multiple />
         <p class="muted" style="margin:.5rem 0 .25rem">…or paste it. <b>The message body alone is enough</b> — the long block of letters and digits. Headers, <code>Subject:</code> and line breaks are all optional; paste the whole email if that is easier.</p>
         <textarea id="r-intake-text" rows="4" placeholder="o2ZhbW91bnQaAAWagWhyZWNlaXZlcngkd2ViQGF4aW9tLWRldi5tb29vLmNvbWZjaGVxdWWi…" style="width:100%;font:11px ui-monospace,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:.5rem"></textarea>
@@ -1895,8 +1896,21 @@ function intakeBytesToCbor(raw) {
       return out;
     }
   } catch (_) { /* fall through */ }
-  // raw CBOR? a cheque bundle is a CBOR map/array — cheap shape check only.
-  if (raw.length > 8 && (raw[0] & 0xe0) >= 0x80) return raw;
+  // Raw CBOR? A protocol artifact is a CBOR MAP or ARRAY at the top level — a
+  // real cheque starts 0xa1 (major type 5, map) and runs ~90 KB.
+  //
+  // ⚠ THE CHECK MUST BE NARROW, and the first version was not. It accepted
+  // `(raw[0] & 0xe0) >= 0x80`, which also passes 0xd0 — the OLE magic that
+  // begins an Outlook `.msg`. So a `.msg` was ACCEPTED as raw CBOR, reported
+  // "✓ took in 1 item", and landed garbage in the inbox: a control claiming
+  // success while nothing arrived. Caught 2026-09-07 before it shipped.
+  //
+  // Major type 4 (array, 0x80-0x9f) and 5 (map, 0xa0-0xbf) only. Everything
+  // else — OLE/.msg (0xd0), PDF (0x25), ZIP (0x50), plain text — is refused and
+  // named to the operator, which is the honest answer: this file is not the
+  // thing you meant to bring in.
+  const mt = raw.length ? (raw[0] & 0xe0) : 0;
+  if (raw.length > 32 && (mt === 0x80 || mt === 0xa0)) return raw;
   return null;
 }
 
