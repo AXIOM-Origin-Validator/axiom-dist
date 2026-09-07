@@ -145,16 +145,36 @@
   </div>
   <div id="boot" class="card"><span class="muted">Loading Core…</span></div>
 
-  <!-- Onboarding (dev test accounts only, for now) -->
+  <!-- Onboarding. REAL email is the default; the dev class is opt-in. -->
   <div id="onboard" class="card hidden">
-    <h2>Create a developer test wallet</h2>
-    <p class="muted" style="margin:.1rem 0 .9rem">This build creates <b>developer test accounts</b> only — the <code>@axiom.internal</code> dev class, on the isolated dev-AXC pool. Public accounts unlock once the validator network is wired for real-email delivery.</p>
+    <h2>Create your wallet</h2>
+    <p class="muted" style="margin:.1rem 0 .9rem">Your wallet is addressed by a <b>real email address</b> you control. Sending works from here: the round rides a held connection to the validators.</p>
+    <p class="muted" style="margin:.1rem 0 .9rem;padding:.55rem .7rem;border:1px solid var(--warn);border-radius:6px">⚠ <b>Receiving does not work in a browser yet.</b> Your cheque is <b>mailed</b> to the address above, and a web page cannot read a mailbox (no raw TCP, no mail protocols). So a claim or an incoming payment will be <b>sent but not collected</b> until you open this wallet in a client that has a mail transport — or until browser pickup ships. Export the wallet from Settings to move it.</p>
+
     <label>Name</label><input id="o-name" value="my-wallet" />
-    <label>Dev email</label>
-    <div class="suffix-row"><input id="o-email-local" placeholder="you" /><span class="suffix">@axiom.internal</span></div>
+
+    <!-- Real-email (default) -->
+    <div id="o-real-block">
+      <label>Email address</label>
+      <input id="o-email" placeholder="you@example.com" inputmode="email" autocomplete="email" />
+    </div>
+
+    <!-- Dev (opt-in) -->
+    <div id="o-dev-block" class="hidden">
+      <label>Dev email</label>
+      <div class="suffix-row"><input id="o-email-local" placeholder="you" /><span class="suffix">@axiom.internal</span></div>
+      <label>Developer passcode</label><input id="o-dev" type="password" placeholder="passcode to create a test account" />
+      <p class="muted" style="margin:.4rem 0 0">Dev accounts are the isolated <code>@axiom.internal</code> class on the dev-AXC pool — <b>separate money</b> from the public supply. They receive through TOT→FATMAMA, which exists only on a development fleet, so a dev wallet <b>cannot transact against a production validator</b>.</p>
+    </div>
+
     <label>Wallet key (password)</label><input id="o-key" type="password" placeholder="strong passphrase" />
     <label>Confirm wallet key</label><input id="o-key2" type="password" placeholder="re-enter passphrase" />
-    <label>Developer passcode</label><input id="o-dev" type="password" placeholder="passcode to create a test account" />
+
+    <label style="display:flex;align-items:center;gap:.5rem;margin-top:.9rem;font-weight:400">
+      <input type="checkbox" id="o-usedev" style="width:auto;margin:0" />
+      <span class="muted">Create a <b>developer test account</b> instead (<code>@axiom.internal</code>, dev-AXC pool)</span>
+    </label>
+
     <div style="margin-top:1rem" class="row">
       <button id="o-create">Create wallet</button>
     </div>
@@ -232,10 +252,10 @@
         <div id="ov-tiers"></div>
       </div>
       <div class="card" id="ov-claim-card">
-        <h2>Dev funds <span class="badge">@axiom.internal</span></h2>
-        <p class="muted" style="margin:.1rem 0 .7rem">Claim <b>1 AXC</b> from the dev-AXC pool: fund (k=3 witness round over TOT) → Nabla register → pull the cheque (TOT→FATMAMA) → CL5 redeem. Runs against the live dev env.</p>
+        <h2 id="ov-claim-title">Claim funds</h2>
+        <p class="muted" id="ov-claim-note" style="margin:.1rem 0 .7rem">Claim <b>1 AXC</b>: fund (k=3 witness round over TOT) → Nabla register → cheque → CL5 redeem.</p>
         <label>Env host (TOT 7400–7409 · Nabla via tunnel)</label><input id="c-host" value="axiom-dev.mooo.com" />
-        <div style="margin-top:.8rem"><button id="ov-claim" style="width:100%">Claim dev funds</button></div>
+        <div style="margin-top:.8rem"><button id="ov-claim" style="width:100%">Claim funds</button></div>
         <pre id="c-out" class="muted" style="margin:.7rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
       </div>
       <div class="card" id="ov-heal-card" style="display:none">
@@ -375,6 +395,17 @@
         <div style="margin-top:.2rem"><button id="r-refresh" style="width:100%">Check for cheques</button></div>
         <div id="r-cheques" class="muted" style="margin-top:.7rem">None yet.</div>
       </div>
+      <!-- TEST-ONLY receive stub. Empty by default; a published build must
+           never ship a value here. See testFetchCycle() for why a browser
+           cannot fetch its own mail. -->
+      <div class="card" id="r-testfetch-card">
+        <h2>Test mail fetcher <span class="badge">testing only</span></h2>
+        <p class="muted" style="margin:.1rem 0 .7rem">A browser <b>cannot</b> read POP3/IMAP — raw TCP and provider TLS are both out of reach, so a real-email wallet cannot receive its cheque here. For <b>testing</b>, run <code>scripts/mail_fetch_test.py --email &lt;your@address&gt;</code> on the same machine and paste its URL below; it pulls the mailbox and feeds this wallet. Leave empty otherwise.</p>
+        <label>Fetcher URL (leave empty to disable)</label>
+        <input id="r-testfetch" placeholder="http://127.0.0.1:8077" />
+        <p class="muted" style="margin:.5rem 0 0">Sending always uses TOT and needs none of this.</p>
+      </div>
+
       <!-- Dev mail connection — last, dev-domain wallets only. -->
       <div class="card" id="r-devmail-card">
         <h2>Dev mail connection <span class="badge">@axiom.internal</span></h2>
@@ -526,7 +557,8 @@ const _mod = await import('../pkg/axiom_sdk_wasm.js?v=' + V);
 const { setup, getCoreId, canonicalCoreId, Wallet, formatAxc, formatLdollarShort, sdkVersion, atomsPerAxc, kuaikuaiArt } = _mod;
 const _init = _mod.default;
 // Dev mail transport (TOT→FATMAMA): POP3 pull + XAXIOM-REGISTER over the tunnel.
-const { fatmamaRegister, kiddoReceiveCycle } = await import('./kiddo.js?v=' + V);
+const { fatmamaRegister, kiddoReceiveCycle, stripEmailToCbor } = await import('./kiddo.js?v=' + V);
+const { makeSessionPool } = await import('./session.js?v=' + V);
 // Genesis dev-funds claim + redeem (fund/commit splits) and the TOT transport.
 const { claimGenesis, redeem, send, sendWithScarPasscode, heal, burnScars, halReanchor, halComplete, recall, recallComplete, resumeSend } = await import('./genesis.js?v=' + V);
 const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V);
@@ -950,6 +982,24 @@ function renderOverview() {
   const info = wallet.info();
   const st = wallet.status();
   $('ov-name').textContent = info.name;
+
+  // ⚠ THE CLAIM CARD MUST NOT SAY "dev funds" FOR A PUBLIC WALLET. The two
+  // claims draw on DIFFERENT MONEY: a dev wallet takes dev-AXC from the
+  // isolated 1M pool; a real-email wallet takes a PUBLIC airdrop against the
+  // 100M cap (AXIOM_DESIGN_FactClassIsolation.md R1, enforced in Core at
+  // validate_transaction). The card was hardcoded to the dev wording, which
+  // was true only while dev was the only class this client could create.
+  {
+    const dev = String(info.email || '').endsWith('@axiom.internal');
+    const t = $('ov-claim-title'), n = $('ov-claim-note'), b = $('ov-claim');
+    if (t) t.innerHTML = dev
+      ? 'Dev funds <span class="badge">@axiom.internal</span>'
+      : 'Claim funds <span class="badge">public</span>';
+    if (b) b.textContent = dev ? 'Claim dev funds' : 'Claim 1 AXC';
+    if (n) n.innerHTML = dev
+      ? 'Claim <b>1 AXC</b> from the isolated <b>dev-AXC</b> pool: fund (k=3 witness round over TOT) → Nabla register → pull the cheque (TOT→FATMAMA) → CL5 redeem. Dev funds are <b>separate money</b> from the public supply, and this path needs a development fleet.'
+      : 'Claim <b>1 AXC</b> from the <b>public</b> supply: fund (k=3 witness round over TOT) → Nabla register → the cheque returns on the held session → CL5 redeem.';
+  }
   // formatAxc takes a u64 → wasm needs a BigInt, but serde-wasm-bindgen
   // serialized balance as a plain JS number. Coerce, or it throws
   // "invalid argument type in toBigInt operation".
@@ -1027,19 +1077,60 @@ function renderOverview() {
 // unlock when validators are wired to sendmail for real-email receive.
 const DEV_DOMAIN = 'axiom.internal';
 const DEV_PASSCODE = 'fatmama approve axiom';
+
+// The dev class is OPT-IN (Sonny, 2026-09-07: "for dev mail, now it should be
+// in an option you have to click in, guard by the dev password ... because all
+// our validator now has proper access to smtp etc"). Real email is the default
+// because it is the only class that works against a production validator: the
+// dev receive path is TOT→FATMAMA, and `dev-fatmama` is compiled OUT of release
+// TOT builds.
+//
+// ⚠ THE DOMAIN IS A PROTOCOL DECISION, NOT A LABEL. `is_dev_wallet()`
+// (core/logic/src/wallet_id.rs) derives the class from an EXACT
+// `@axiom.internal` suffix, and Core enforces class isolation at
+// `validate_transaction` (AXIOM_DESIGN_FactClassIsolation.md R1). A dev wallet
+// spends dev-AXC from the isolated 1M pool; a real-email wallet is PUBLIC class
+// against the 100M cap. They are different money.
+$('o-usedev').onchange = () => {
+  const dev = $('o-usedev').checked;
+  $('o-dev-block').classList.toggle('hidden', !dev);
+  $('o-real-block').classList.toggle('hidden', dev);
+  setMsg('');
+};
+
 $('o-create').onclick = async () => {
   setMsg('');
   const name = $('o-name').value.trim();
-  const local = $('o-email-local').value.trim().toLowerCase();
   const key = $('o-key').value, key2 = $('o-key2').value;
-  const dev = $('o-dev').value;
+  const useDev = $('o-usedev').checked;
   if (!name) { setMsg('Enter a wallet name.', 'err'); $('o-name').focus(); return; }
-  if (!local) { setMsg('Enter the dev email (the part before @axiom.internal).', 'err'); $('o-email-local').focus(); return; }
-  if (/[^a-z0-9._-]/.test(local)) { setMsg('Dev email: letters, digits, and . _ - only (before @axiom.internal).', 'err'); $('o-email-local').focus(); return; }
-  if (dev !== DEV_PASSCODE) { setMsg('Developer passcode required to create a test account.', 'err'); $('o-dev').focus(); return; }
+
+  let email;
+  if (useDev) {
+    const local = $('o-email-local').value.trim().toLowerCase();
+    const dev = $('o-dev').value;
+    if (!local) { setMsg('Enter the dev email (the part before @axiom.internal).', 'err'); $('o-email-local').focus(); return; }
+    if (/[^a-z0-9._-]/.test(local)) { setMsg('Dev email: letters, digits, and . _ - only (before @axiom.internal).', 'err'); $('o-email-local').focus(); return; }
+    if (dev !== DEV_PASSCODE) { setMsg('Developer passcode required to create a test account.', 'err'); $('o-dev').focus(); return; }
+    email = `${local}@${DEV_DOMAIN}`;   // dev class — isolated dev-AXC pool
+  } else {
+    email = $('o-email').value.trim().toLowerCase();
+    if (!email) { setMsg('Enter your email address.', 'err'); $('o-email').focus(); return; }
+    // Deliberately permissive: an address is ROUTING, not identity
+    // (YP §16.8.0.1a), and the protocol does not police domains. Reject only
+    // what cannot be an address at all, plus the dev domain, which must come
+    // from the checkbox so the class is always a deliberate choice.
+    if (!/^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(email)) {
+      setMsg('Enter a valid email address (you@example.com).', 'err'); $('o-email').focus(); return;
+    }
+    if (email.endsWith(`@${DEV_DOMAIN}`)) {
+      setMsg(`@${DEV_DOMAIN} is the developer class — tick "Create a developer test account" to use it.`, 'err');
+      $('o-email').focus(); return;
+    }
+  }
+
   if (!key) { setMsg('Enter a wallet key (password) — the field is empty.', 'err'); $('o-key').focus(); return; }
   if (key !== key2) { setMsg('Wallet keys do not match — re-enter to confirm.', 'err'); $('o-key2').focus(); return; }
-  const email = `${local}@${DEV_DOMAIN}`;   // dev class — auto-routed to the dev-AXC pool
   try {
     console.log('[axiom] creating wallet', { name, email, parent: PARENT });
     await VAULT.init(key);   // derive the at-rest key BEFORE create (it persists immediately)
@@ -1110,7 +1201,7 @@ $('o-import').onclick = async () => {
     storage.writeAtomic(`${PARENT}/${name}/wallet.axiom`, buf);  // seals the AXWL into an AXEJ frame in localStorage
     wallet = Wallet.openWithJsStorage(`${PARENT}/${name}`, storage);
     if (!wallet.verifyKey(key)) {                                // key must match the wallet's own auth_hash
-      try { wallet.close(); } catch(_){} wallet = null; VAULT.lock(); forgetWallet(name);
+      closeSessionPool(); try { wallet.close(); } catch(_){} wallet = null; VAULT.lock(); forgetWallet(name);
       setMsg('Wrong key for this backup — it must be the password the wallet was created with on the source device.', 'err'); $('o-key').focus(); return;
     }
     localStorage.setItem('axiom_last_wallet', name);
@@ -1118,7 +1209,7 @@ $('o-import').onclick = async () => {
     toast('wallet imported');
     renderOverview();
   } catch (e) {
-    try { wallet?.close(); } catch(_){} wallet = null; VAULT.lock();
+    closeSessionPool(); try { wallet?.close(); } catch(_){} wallet = null; VAULT.lock();
     try { forgetWallet(name); } catch(_){}                       // don't leave a half-written wallet behind
     const m = String(e && e.message || e);
     if (m.includes('VersionMismatch') || m.toLowerCase().includes('version'))
@@ -1147,7 +1238,7 @@ $('u-open').onclick = async () => {
     await VAULT.unlock(key, VAULT.saltOf(frame));
     wallet = Wallet.openWithJsStorage(`${PARENT}/${name}`, storage);
     if (!wallet.verifyKey(key)) {               // protocol owner-proof (YP §39.3) — defence in depth
-      try { wallet.close(); } catch(_){} wallet = null; VAULT.lock();
+      closeSessionPool(); try { wallet.close(); } catch(_){} wallet = null; VAULT.lock();
       setMsg('Wrong wallet key — try again.', 'err'); $('u-key').focus(); return;
     }
     localStorage.setItem('axiom_last_wallet', name);
@@ -1155,7 +1246,7 @@ $('u-open').onclick = async () => {
     setMsg('');
     renderOverview();
   } catch (e) {
-    try { wallet?.close(); } catch(_){} wallet = null; VAULT.lock();
+    closeSessionPool(); try { wallet?.close(); } catch(_){} wallet = null; VAULT.lock();
     const m = String(e && e.message || e);
     if (m.includes('VAULT_BADKEY')) { setMsg('Wrong wallet key — try again.', 'err'); $('u-key').focus(); }
     else { setMsg('Open failed — ' + errOf(e), 'err'); console.error('[axiom] open failed', e); }
@@ -1527,6 +1618,100 @@ $('p-cert').onclick = () => {
 // Receive — pull inbound cheques (TOT→FATMAMA), scan them into the wallet,
 // and offer a per-cheque Redeem (CL5). The host comes from the Receive tab's
 // own TOT field; the validator/Nabla set is the shared env discovery.
+// ── WHICH RECEIVE LEG? The wallet's CLASS decides, never a preference ──────
+//
+// DEV (`@axiom.internal`): replies are MAILED and drained out of FATMAMA by
+// kiddo.js. That tunnel is `dev-fatmama`, COMPILED OUT of production TOT — a
+// dev wallet therefore cannot complete a round against a real validator.
+//
+// NORMAL (real email): the round rides a HELD TOT `/session`; ANTIE deposits
+// the replies into that session's custody directory and TOT pumps them back
+// down the same socket (AXIOM_DESIGN_TOT.md §5.4, YPX-023 §3.3).
+//
+// ⚠ Taking the /session route for a dev wallet is REJECTED by ANTIE — the route
+// is the client's declaration of class and it is cross-checked against the
+// sender address ("stamp and address disagree", YPX-023 §2B.4). So this is
+// derived from the address, exactly as `is_dev_wallet()` does in Core.
+const DEV_SUFFIX = '@axiom.internal';
+function walletIsDev() {
+  try { return String(wallet.info().email || '').endsWith(DEV_SUFFIX); }
+  catch (_) { return false; }
+}
+// One pool per wallet session, lazily made; holds one socket per validator.
+let SESSION_POOL = null;
+function sessionPool() {
+  if (walletIsDev()) return null;                       // dev never sessions
+  if (!SESSION_POOL) {
+    SESSION_POOL = makeSessionPool({
+      storage,
+      walletDir: `${PARENT}/${wallet.info().name}`,
+      onLanded: (n, v) => console.log(`[session] landed reply ${n} from ${v}`),
+    });
+  }
+  return SESSION_POOL;
+}
+function closeSessionPool() {
+  if (SESSION_POOL) { try { SESSION_POOL.closeAll(); } catch (_) {} SESSION_POOL = null; }
+}
+
+// ── TEST-ONLY RECEIVE STUB (mail_fetch_test.py) ───────────────────────────
+//
+// ⚠⚠ THIS IS A TEST STUB, NOT A TRANSPORT. It is OFF unless a URL is entered.
+//
+// A browser cannot fetch its own mail: POP3/IMAP are raw TCP, a real provider is
+// implicit TLS + AUTH, and a browser has neither raw sockets nor a TLS stack to
+// point at an arbitrary host. TOT's tunnel pumps bytes opaquely, so even
+// tunnelled the handshake would have to happen in JS. That is a property of
+// BROWSERS, not a defect in AXIOM — every other client (soak, Mac wallet) runs
+// its own mail transport, which is the application's job.
+//
+// So for testing, `scripts/mail_fetch_test.py` plays that role: it holds the
+// mailbox credentials, pulls over IMAP+TLS, and serves the raw messages on
+// loopback. This drains it into the SAME maildir/inbox/new the machines poll —
+// identical downstream shape to the dev FATMAMA path, different source.
+//
+// ⚠ DO NOT SHIP A DEFAULT FOR THIS and do not let it become "the browser's
+// transport". A released browser wallet needs a real answer with an auth story
+// (Sonny, 2026-09-07: "we may/maynot to upgrade the subsystem to be a release
+// version for validator in the future"). Until then a real-email wallet cannot
+// receive in a published build, and the UI must not pretend otherwise.
+function testFetchUrl() {
+  const el = $('r-testfetch');
+  return el ? el.value.trim() : '';
+}
+
+async function testFetchCycle() {
+  const base = testFetchUrl();
+  if (!base || !wallet) return 0;
+  let msgs;
+  try {
+    const r = await fetch(`${base.replace(/\/$/, '')}/mail`, { cache: 'no-store' });
+    if (!r.ok) return 0;
+    msgs = (await r.json()).messages || [];
+  } catch (_) { return 0; }          // fetcher not running — silent, it is optional
+  if (!msgs.length) return 0;
+
+  const inboxNew = `${PARENT}/${wallet.info().name}/maildir/inbox/new`;
+  let landed = 0;
+  for (const b64 of msgs) {
+    let raw;
+    try {
+      const bin = atob(b64);
+      raw = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+    } catch (_) { continue; }
+    // ONE owner for the carrier-wrapper strip — kiddo.js. MIME never reaches
+    // no_std machine code, so this must produce raw CBOR or drop the message.
+    const cbor = stripEmailToCbor(raw);
+    if (!cbor) { console.warn('[testfetch] dropping: not a base64-CBOR email'); continue; }
+    const name = `${(Date.now() / 1000).toFixed(6)}.${landed}.tf.${crypto.randomUUID()}`;
+    storage.writeAtomic(`${inboxNew}/${name}`, cbor);
+    landed++;
+  }
+  if (landed) console.log(`[testfetch] landed ${landed} message(s) into the inbox`);
+  return landed;
+}
+
 function recvHost() { return ($('r-tot').value.trim() || 'axiom-dev.mooo.com:7400').replace(/:\d+$/, ''); }
 // Build a TOT transport for `host`, configured to email-wrap outbound
 // deliveries as `messageType` (witness/redeem) from this wallet's address.
@@ -1538,6 +1723,7 @@ function mkTransport(host, messageType) {
     fromEmail: wallet.info().email,
     messageType,
     cl1: CL1, cl5: CL5,   // null unless the CL worker came up → in-process fallback
+    session: sessionPool(),   // null for a dev wallet → /intake + FATMAMA drain
   }));
 }
 function recvParams() {
@@ -1612,7 +1798,10 @@ async function receiveCycle() {
   // Bound the whole pull so a stalled FATMAMA leg can't hang "Pulling…"
   // forever (fatmamaRegister's .catch only swallows a reject, not a hang).
   await Promise.race([
-    kiddoReceiveCycle({ smtpWs: `ws://${host}:7400/fatmama/0`, pop3Ws: `ws://${host}:7400/fatmama/1`, email: wallet.info().email, storage, walletDir: `${PARENT}/${wallet.info().name}` }),
+    // Dev-only probe: a real-email wallet has no FATMAMA mailbox to drain.
+    walletIsDev()
+      ? kiddoReceiveCycle({ smtpWs: `ws://${host}:7400/fatmama/0`, pop3Ws: `ws://${host}:7400/fatmama/1`, email: wallet.info().email, storage, walletDir: `${PARENT}/${wallet.info().name}` })
+      : Promise.resolve(0),
     new Promise((_, rej) => setTimeout(() => rej(new Error('pull timed out')), 18000)),
   ]).catch(() => {});
   // YPX-001 §1.5.1 — scan for scar-consent notifications BEFORE recv() sweeps
@@ -1740,6 +1929,30 @@ function purgeMaildirCur() {
 }
 
 async function withReceivePump(host, fn) {
+  // ⚠ A NORMAL WALLET NEEDS NO PUMP. Its replies arrive on the held /session
+  // socket and session.js lands them in the SAME inbox the machines poll, so
+  // there is nothing to drain. Running the FATMAMA cycle for it would be worse
+  // than useless: `dev-fatmama` does not exist on a production validator, so
+  // every cycle would throw, and on a dev fleet it would pull another wallet's
+  // mailbox route. The class decides — see walletIsDev().
+  if (!walletIsDev()) {
+    // Witness replies arrive on the held /session socket (session.js) and need
+    // no pump. The CHEQUE does not: it is a DELIVERY, mailed by the validator's
+    // outbound carrier to this wallet's real address (see the banner in
+    // antie/src/gateway.rs). A browser cannot fetch that itself, so when the
+    // TEST fetcher is configured we drain it here; with no URL this is a no-op
+    // and the cheque simply never arrives, which is the honest state today.
+    let running = true;
+    const tf = (async () => {
+      while (running) {
+        try { await testFetchCycle(); } catch (_) { /* optional */ }
+        await sleep(1500);
+      }
+    })();
+    try { return await fn(); }
+    finally { running = false; try { await tf; } catch (_) {} purgeMaildirCur(); }
+  }
+
   const email = wallet.info().email;
   const walletDir = `${PARENT}/${wallet.info().name}`;
   let running = true;
@@ -1795,8 +2008,17 @@ async function runGenesisClaim({ amountAtoms, tier = 0, btn, out, authReason }) 
       nablaTcpAddresses: NABLAS,
     };
 
-    log(`Registering ${wallet.info().email} with FATMAMA…`);
-    await fatmamaRegister(`ws://${host}:7400/fatmama/0`, wallet.info().email).catch(() => {});
+    // ⚠ DEV ONLY. FATMAMA is the dev loopback SMTP tool; a real-email wallet's
+    // mail is carried by the validator's actual outbound carrier (SMTP to the
+    // provider / own-MX), so registering a FATMAMA mailbox for it is both
+    // meaningless and impossible on a production validator, where the
+    // `/fatmama` tunnel is compiled out (`dev-fatmama`). Missing this on
+    // 2026-09-07 made a PUBLIC wallet open the dev tunnel — caught by
+    // browser_real_email_claim_gate.py, which fails on a single fatmama socket.
+    if (walletIsDev()) {
+      log(`Registering ${wallet.info().email} with FATMAMA…`);
+      await fatmamaRegister(`ws://${host}:7400/fatmama/0`, wallet.info().email).catch(() => {});
+    }
 
     log('Fund + register (k=3 witness round over TOT)…');
     // The receive pump drains FATMAMA into the inbox throughout, so the

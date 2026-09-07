@@ -11,6 +11,12 @@
 //   {
 //     // map a validator's delivery email -> its TOT /intake ws:// URL
 //     intakeWsFor(validatorEmail) -> "ws://host:port/intake",
+//     // NORMAL (real-email) wallets only — the held reply leg. When BOTH this
+//     // and `session` are supplied, deliver() uses /session and the replies
+//     // come back on the same socket (see session.js). Absent => /intake
+//     // fire-and-forget, and something else must fill the inbox (dev: kiddo).
+//     sessionWsFor(validatorEmail) -> "ws://host:port/session",
+//     session: makeSessionPool({ storage, walletDir }),
 //     // map a Nabla TCP "host:port" -> a TOT /nabla/<n> ws:// tunnel URL
 //     nablaWsFor(nablaAddress)     -> "ws://host:port/nabla/0",
 //     // optional: map a Nabla "host:port" -> "http://host:port" for the
@@ -107,14 +113,32 @@ export function makeTotTransport(config) {
     // verbatim to the validator's maildir, where ANTIE reads it as an email
     // — so we wrap the raw UMP payload in the RFC822 envelope ANTIE expects.
     async deliver(validatorEmail, payload) {
-      const url = config.intakeWsFor(validatorEmail);
-      if (!url) throw new Error(`no TOT /intake for ${validatorEmail}`);
       const email = buildEmail(
         config.fromEmail || 'wallet@axiom.internal',
         validatorEmail,
         config.messageType || 'witness',
         payload,
       );
+
+      // NORMAL (real-email) wallet: send over the HELD /session socket, so the
+      // validator's reply comes back on the same connection and is landed in
+      // the wallet's inbox by session.js. TOT stamps `X-TOT-Session` itself —
+      // the client must NOT add it, and must never take this route for a dev
+      // wallet (ANTIE rejects a stamp/address disagreement, YPX-023 §2B.4).
+      if (config.session && config.sessionWsFor) {
+        const surl = config.sessionWsFor(validatorEmail);
+        if (surl) {
+          await config.session.deliver(validatorEmail, surl, email);
+          return;
+        }
+      }
+
+      // DEV wallet (or no session configured): fire-and-forget into /intake.
+      // The reply is MAILED, and for a dev wallet kiddo.js drains it out of
+      // FATMAMA into the same inbox. ⚠ On a production validator the fatmama
+      // tunnel does not exist, so this leg alone cannot complete a round.
+      const url = config.intakeWsFor(validatorEmail);
+      if (!url) throw new Error(`no TOT /intake for ${validatorEmail}`);
       await wsRoundtrip(url, email, false);
     },
 
@@ -176,11 +200,19 @@ function gwHttpBase(addr) {
   return `https://${host}/nh/${port || '80'}`;
 }
 
-export function totConfigFrom({ validators, nablas, nablaTotWs, fromEmail, messageType, cl1, cl5 }) {
+export function totConfigFrom({ validators, nablas, nablaTotWs, fromEmail, messageType, cl1, cl5, session }) {
   const intake = new Map(validators.map(v => [v.email, `${v.totWs}/intake`]));
+  // The held reply leg. Same host/port as /intake — one TOT per validator, two
+  // routes on it (AXIOM_DESIGN_TOT.md §5.4).
+  const sessionUrls = new Map(validators.map(v => [v.email, `${v.totWs}/session`]));
   const nablaIdx = new Map((nablas || []).map((addr, i) => [addr, i]));
   return {
     intakeWsFor: (email) => gwWs(intake.get(email)),
+    sessionWsFor: (email) => gwWs(sessionUrls.get(email)),
+    // Present ONLY for a normal (real-email) wallet — index.html supplies the
+    // pool from the wallet's class, never from a preference. Absent => the
+    // dev /intake + FATMAMA-drain path.
+    session,
     nablaWsFor: (addr) => {
       const i = nablaIdx.get(addr);
       return i === undefined ? undefined : gwWs(`${nablaTotWs}/nabla/${i}`);
