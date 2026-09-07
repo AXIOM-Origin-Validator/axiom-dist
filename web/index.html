@@ -415,8 +415,8 @@
         <label>Bring in something that arrived by mail</label>
         <p class="muted" style="margin:.1rem 0 .5rem">Anything mailed to this wallet — a <b>cheque</b>, a payment, or a <b>validator certificate</b> — arrives at your mailbox, and a web page cannot read one. Save the message from your mail client and choose it here, or paste its contents. Then press <b>Check for cheques</b>.</p>
         <input type="file" id="r-intake-file" accept=".eml,.cbor,.txt,message/rfc822,application/octet-stream" multiple />
-        <p class="muted" style="margin:.5rem 0 .25rem">…or paste the message (or just its base64 body):</p>
-        <textarea id="r-intake-text" rows="4" placeholder="From: …&#10;Subject: AXIOM/…&#10;&#10;o2ZhbW91bnQa…" style="width:100%;font:11px ui-monospace,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:.5rem"></textarea>
+        <p class="muted" style="margin:.5rem 0 .25rem">…or paste it. <b>The message body alone is enough</b> — the long block of letters and digits. Headers, <code>Subject:</code> and line breaks are all optional; paste the whole email if that is easier.</p>
+        <textarea id="r-intake-text" rows="4" placeholder="o2ZhbW91bnQaAAWagWhyZWNlaXZlcngkd2ViQGF4aW9tLWRldi5tb29vLmNvbWZjaGVxdWWi…" style="width:100%;font:11px ui-monospace,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:.5rem"></textarea>
         <div style="margin-top:.5rem" class="row"><button id="r-intake" class="ghost" style="width:100%">Take it in</button></div>
         <pre id="r-intake-out" class="muted" style="margin:.6rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
         <div id="r-cheques" class="muted" style="margin-top:.7rem">None yet.</div>
