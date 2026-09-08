@@ -154,6 +154,33 @@
     <p class="muted" style="margin:.1rem 0 .9rem">Your wallet is addressed by a <b>real email address</b> you control. Sending works from here: the round rides a held connection to the validators.</p>
     <p class="muted" style="margin:.1rem 0 .9rem;padding:.55rem .7rem;border:1px solid var(--warn);border-radius:6px">⚠ <b>Receiving does not work in a browser yet.</b> Your cheque is <b>mailed</b> to the address above, and a web page cannot read a mailbox (no raw TCP, no mail protocols). So a claim or an incoming payment will be <b>sent but not collected</b> until you open this wallet in a client that has a mail transport — or until browser pickup ships. Export the wallet from Settings to move it.</p>
 
+    <!-- §5.5 step 4 — VALIDATOR SETUP MODE (decisions 1–4 + the 2026-09-08
+         rulings): BOTH wallets are created here from the validator's name;
+         the operator types each wallet's email and each wallet's own
+         passphrase. Names are derived, never typed. Two DISTINCT addresses —
+         a wallet is its own mailbox, never shared. -->
+    <div id="o-vsetup" class="hidden">
+      <h3 style="margin:.2rem 0 .4rem">Stake wallet — <span id="vs-stake-name" style="font-family:monospace"></span></h3>
+      <p class="muted" style="margin:.1rem 0 .5rem">Holds the stake. Once a subsidy is claimed it is locked; it can still receive but cannot send. Give it its own address and its own passphrase.</p>
+      <label>Stake wallet email</label>
+      <input id="vs-stake-email" placeholder="stake@example.com" inputmode="email" autocomplete="off" />
+      <label>Stake wallet key (passphrase)</label><input id="vs-stake-key" type="password" placeholder="strong passphrase" />
+      <label>Confirm</label><input id="vs-stake-key2" type="password" placeholder="re-enter passphrase" />
+
+      <h3 style="margin:1rem 0 .4rem">Operational wallet — <span id="vs-op-name" style="font-family:monospace"></span></h3>
+      <p class="muted" style="margin:.1rem 0 .5rem">Fees earned, costs paid, day-to-day. Moves freely; replaceable later.</p>
+      <label>Operational wallet email</label>
+      <input id="vs-op-email" placeholder="ops@example.com" inputmode="email" autocomplete="off" />
+      <label>Operational wallet key (passphrase)</label><input id="vs-op-key" type="password" placeholder="a different passphrase" />
+      <label>Confirm</label><input id="vs-op-key2" type="password" placeholder="re-enter passphrase" />
+
+      <div style="margin-top:1rem" class="row">
+        <button id="vs-create">Create both wallets</button>
+      </div>
+      <p class="muted" style="margin-top:.8rem">Both wallets are created in this browser, encrypted at rest under their own keys. Next step is the hand-off to the validator — until that intake exists, export each wallet file from its Validator tab and copy it to the validator.</p>
+    </div>
+
+    <div id="o-standard">
     <label>Name</label><input id="o-name" value="my-wallet" />
 
     <!-- Real-email (default) -->
@@ -188,6 +215,7 @@
     <p class="muted" style="margin:.1rem 0 .5rem">Bring a wallet over from <b>a validator</b>, the desktop wallet, or another browser. Accepted: a validator's <code>wallet.axiom</code> (copy the file straight across — this is how a wallet comes back after a stake claim), or an <b>encrypted backup</b> (Mac: <b>Wallets → Export</b> → <code>wallet.axpw</code>). Choose the file here and reuse the <b>Name</b> + <b>Wallet key</b> fields above — the key must be the one the wallet uses. It is re-encrypted at rest in this browser under that key (dev passcode + confirm-key don't apply to import).</p>
     <input type="file" id="o-import-file" accept=".axpw,.axiom,application/octet-stream" />
     <div style="margin-top:.6rem" class="row"><button id="o-import" class="ghost">Import wallet</button></div>
+    </div><!-- /o-standard -->
   </div>
 
   <!-- Unlock -->
@@ -1034,6 +1062,41 @@ function refreshWalletPicker() {
 if (refreshWalletPicker().length > 0) { show('unlock'); $('u-key').focus(); }
 else { show('onboard'); }
 
+// One address rule for the whole page (the standard create path repeats it
+// inline; setup mode uses this). Hoisted above the boot block that uses it.
+const REAL_EMAIL_RE = /^[^\s@]+@[^\s@.]+\.[^\s@]+$/;
+
+// §5.5 step 7 — the hand-off. validator-setup serves this page on loopback
+// and minted a per-run token into the URL; the page POSTs each wallet's
+// canonical file bytes (AXWL — exactly what the SDK stores; the vault is
+// unlocked for this wallet at the moment of creation) to /intake/<role> on
+// the SAME origin with that token. No passphrase travels: the validator
+// holds the file, as it holds its own keys. Returns the validator's reply
+// ({ok, path, ...}) or null when this page was not opened by validator-setup.
+async function handOffToValidator(role, name, email, w) {
+  const q = new URLSearchParams(location.search);
+  const token = (q.get('token') || '').trim();
+  if (q.get('setup') !== '1' || !token) return null;
+  const bytes = storage.read(`${PARENT}/${name}/wallet.axiom`);
+  const info = w.info();
+  const r = await fetch(`/intake/${role}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Axiom-Setup-Token': token,
+      'X-Axiom-Wallet-Name': name,
+      'X-Axiom-Wallet-Email': email,
+      'X-Axiom-Wallet-Address': info.address || '',
+    },
+    body: bytes,
+  });
+  let reply = null;
+  try { reply = await r.json(); } catch (_) {}
+  if (!r.ok || !reply || !reply.ok) {
+    throw new Error(`the validator refused the ${role} wallet: ` + ((reply && reply.error) || `HTTP ${r.status}`));
+  }
+  return reply;
+}
 // §5.5 step 2 — launched by validator-setup on the validator's loopback with
 // `?validator=<name>&setup=1`. The name is the validator's own (decision 3):
 // both wallets are named from it, <name>_Stake first. textContent, never HTML —
@@ -1048,6 +1111,16 @@ else { show('onboard'); }
       `(fees, day-to-day). Create ${vname}_Stake first; the name is filled in below.`;
     b.classList.remove('hidden');
     if ($('o-name').value === 'my-wallet') $('o-name').value = `${vname}_Stake`;
+    // Step 4: the two-wallet form replaces the single-wallet form. The
+    // validator's own address (its `--email`) is only a HINT for the
+    // operational wallet — both addresses are the operator's to type.
+    $('vs-stake-name').textContent = `${vname}_Stake`;
+    $('vs-op-name').textContent = `${vname}_Operational`;
+    const hint = (q.get('email') || '').trim().toLowerCase();
+    if (hint && REAL_EMAIL_RE.test(hint)) $('vs-op-email').value = hint;
+    $('o-standard').classList.add('hidden');
+    $('o-vsetup').classList.remove('hidden');
+    $('vs-stake-email').focus();
   }
 }
 
@@ -1205,12 +1278,7 @@ $('o-create').onclick = async () => {
   if (!key) { setMsg('Enter a wallet key (password) — the field is empty.', 'err'); $('o-key').focus(); return; }
   if (key !== key2) { setMsg('Wallet keys do not match — re-enter to confirm.', 'err'); $('o-key2').focus(); return; }
   try {
-    console.log('[axiom] creating wallet', { name, email, parent: PARENT });
-    await VAULT.init(key);   // derive the at-rest key BEFORE create (it persists immediately)
-    wallet = Wallet.createWithJsStorage(name, email, key, PARENT, storage);
-    console.log('[axiom] created; saving…');
-    wallet.save();
-    localStorage.setItem('axiom_last_wallet', name);
+    wallet = await createWalletLocal(name, email, key);
     setMsg('');
     toast('wallet created');
     renderOverview();
@@ -1219,6 +1287,71 @@ $('o-create').onclick = async () => {
     VAULT.lock();
     setMsg('Create failed — ' + errOf(e), 'err');
     console.error('[axiom] create failed', e);
+  }
+};
+
+// ONE creation path (RULE 1): keygen + first save under a fresh at-rest key.
+// Local only — no network. The caller decides what to do with the handle.
+async function createWalletLocal(name, email, key) {
+  console.log('[axiom] creating wallet', { name, email, parent: PARENT });
+  await VAULT.init(key);   // derive the at-rest key BEFORE create (it persists immediately)
+  const w = Wallet.createWithJsStorage(name, email, key, PARENT, storage);
+  console.log('[axiom] created; saving…');
+  w.save();
+  localStorage.setItem('axiom_last_wallet', name);
+  return w;
+}
+
+
+// §5.5 step 4 — validator setup mode: both wallets, derived names, two
+// addresses, two passphrases (Sonny, 2026-09-08). Sequential under the vault:
+// each wallet's frames are sealed under its OWN key, so create → close → lock
+// between the two. Ends on the unlock screen with both wallets listed; the
+// hand-off (step 7) is the next build.
+$('vs-create').onclick = async () => {
+  setMsg('');
+  const stakeName = $('vs-stake-name').textContent, opName = $('vs-op-name').textContent;
+  const stakeEmail = $('vs-stake-email').value.trim().toLowerCase();
+  const opEmail = $('vs-op-email').value.trim().toLowerCase();
+  const sk = $('vs-stake-key').value, sk2 = $('vs-stake-key2').value;
+  const ok = $('vs-op-key').value, ok2 = $('vs-op-key2').value;
+  for (const [em, id, what] of [[stakeEmail, 'vs-stake-email', 'stake'], [opEmail, 'vs-op-email', 'operational']]) {
+    if (!REAL_EMAIL_RE.test(em)) { setMsg(`Enter a valid ${what} wallet email (you@example.com).`, 'err'); $(id).focus(); return; }
+    if (em.endsWith(`@${DEV_DOMAIN}`)) { setMsg(`@${DEV_DOMAIN} is the developer class — not for a validator's wallets.`, 'err'); $(id).focus(); return; }
+  }
+  if (stakeEmail === opEmail) { setMsg('The two wallets need two DIFFERENT addresses — a wallet is its own mailbox, never shared.', 'err'); $('vs-op-email').focus(); return; }
+  if (!sk) { setMsg('Enter the stake wallet key.', 'err'); $('vs-stake-key').focus(); return; }
+  if (sk !== sk2) { setMsg('Stake wallet keys do not match.', 'err'); $('vs-stake-key2').focus(); return; }
+  if (!ok) { setMsg('Enter the operational wallet key.', 'err'); $('vs-op-key').focus(); return; }
+  if (ok !== ok2) { setMsg('Operational wallet keys do not match.', 'err'); $('vs-op-key2').focus(); return; }
+  if (listWallets().includes(stakeName) || listWallets().includes(opName)) {
+    setMsg(`${stakeName} or ${opName} already exists in this browser — Forget it on the unlock screen first.`, 'err'); return;
+  }
+  $('vs-create').disabled = true;
+  try {
+    const w1 = await createWalletLocal(stakeName, stakeEmail, sk);
+    const h1 = await handOffToValidator('stake', stakeName, stakeEmail, w1);
+    try { w1.close(); } catch (_) {}
+    VAULT.lock();
+    const w2 = await createWalletLocal(opName, opEmail, ok);
+    const h2 = await handOffToValidator('operational', opName, opEmail, w2);
+    try { w2.close(); } catch (_) {}
+    VAULT.lock();
+    localStorage.setItem('axiom_last_wallet', stakeName);
+    refreshWalletPicker();
+    $('u-wallet').value = stakeName;
+    show('unlock');
+    const handed = h1 && h2
+      ? ` Handed to the validator: ${h1.path} and ${h2.path} — it continues its setup from those files.`
+      : ` Next: hand them to the validator — export each wallet file from its Validator tab (this page was not opened by validator-setup, so there is no intake to post to).`;
+    setMsg(`Both wallets created: ${stakeName} (${stakeEmail}) and ${opName} (${opEmail}). Open either with its own key.` + handed, 'ok');
+    toast('both wallets created');
+  } catch (e) {
+    VAULT.lock();
+    setMsg('Create failed — ' + errOf(e), 'err');
+    console.error('[axiom] validator setup create failed', e);
+  } finally {
+    $('vs-create').disabled = false;
   }
 };
 
