@@ -73,6 +73,36 @@ export class Wallet {
         }
     }
     /**
+     * §6b — apply Nabla's reply to the certificate: on OK returns the STAMPED
+     * `vbc.json` text (verified under Core's rules first); a refusal throws
+     * with Nabla's status and reason verbatim.
+     * @param {string} vbc_json
+     * @param {Uint8Array} response
+     * @returns {string}
+     */
+    applyRegisterVbcResponse(vbc_json, response) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(vbc_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(response, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.wallet_applyRegisterVbcResponse(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
      * Current balance in atoms.
      * @returns {bigint}
      */
@@ -82,6 +112,26 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[1]);
         }
         return BigInt.asUintN(64, ret[0]);
+    }
+    /**
+     * §6b — build the signed `RegisterVbcRequest` bytes for the operator's
+     * `vbc.json` text, from THIS wallet's own view of itself. The browser
+     * ships the bytes over `transport.nablaTcp(addr, bytes)` (it cannot block
+     * on IO here) and hands the reply to `applyRegisterVbcResponse`.
+     * Refuses when this wallet is not the certificate's stake wallet.
+     * @param {string} vbc_json
+     * @returns {Uint8Array}
+     */
+    buildRegisterVbcRequest(vbc_json) {
+        const ptr0 = passStringToWasm0(vbc_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_buildRegisterVbcRequest(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
     }
     /**
      * Explicit scar-burn — the de-orchestrated counterpart `heal` no longer
@@ -1708,7 +1758,7 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 266, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 283, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8);
             return ret;
         },

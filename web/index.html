@@ -541,6 +541,27 @@
           Anyone holding this file <i>and</i> its passphrase controls the stake. Treat it like the key it is.
         </p>
       </div>
+
+      <!-- §6b — VBC REGISTRATION. A certificate is a CANDIDATE until Nabla
+           stamps it; the operator carries it here, from the stake wallet it
+           names, and takes the stamped file back to the validator. -->
+      <div class="card">
+        <h2>Register a validator certificate</h2>
+        <p class="muted" style="margin:.1rem 0 .7rem">
+          An issued certificate is not usable until <b>Nabla stamps it</b>. Nabla checks
+          <b>this wallet</b> — the stake wallet the certificate names — against its own
+          records (the wallet exists, holds the stake floor, sits at its confirmed head)
+          and either stamps the certificate or refuses. Each certificate can be
+          registered <b>once</b>.
+        </p>
+        <input id="v-vbc" type="file" accept=".json,application/json" style="width:100%">
+        <button id="v-register" class="ghost" style="width:100%; margin-top:.5rem">Register with Nabla</button>
+        <p class="muted" style="margin:.6rem 0 0">
+          Choose the validator's <code>config/vbc.json</code>. On success the <b>stamped</b>
+          file downloads — copy it back over <code>config/vbc.json</code> on the validator.
+        </p>
+        <pre id="v-reg-out" class="muted" style="margin:.6rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+      </div>
     </div>
 
     <div class="row" style="margin-top:.5rem">
@@ -2290,6 +2311,46 @@ $('v-export').onclick = () => {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   setMsg(`exported ${n} file(s) — still encrypted, keep the passphrase`, 'ok');
+};
+
+// §6b — register a certificate with Nabla from THIS wallet. The wasm builds
+// the signed request (it holds the key) and applies the reply; the bytes
+// travel over the same TOT /nabla tunnel every other Nabla call uses. Nabla's
+// refusal is shown verbatim — every node judges the same registered state,
+// so a refusal is the answer, not a reason to try the next node.
+$('v-register').onclick = async () => {
+  const out = $('v-reg-out'); out.textContent = '';
+  if (!wallet) { setMsg('open a wallet first', 'err'); return; }
+  const f = $('v-vbc').files && $('v-vbc').files[0];
+  if (!f) { setMsg('choose the certificate file (vbc.json) first', 'err'); return; }
+  const btn = $('v-register'); btn.disabled = true;
+  try {
+    const text = await f.text();
+    const req = wallet.buildRegisterVbcRequest(text);
+    const host = location.hostname || '127.0.0.1';
+    const transport = mkTransport(host, 'witness');
+    let stamped = null, lastErr = null;
+    for (const addr of NABLAS) {
+      let reply;
+      try { reply = await transport.nablaTcp(addr, req); }
+      catch (e) { lastErr = e; out.textContent += `${addr}: unreachable (${e.message || e})\n`; continue; }
+      // A decoded refusal throws with Nabla's status + reason; do not retry it.
+      stamped = wallet.applyRegisterVbcResponse(text, reply);
+      out.textContent += `${addr}: OK — stamped\n`;
+      break;
+    }
+    if (!stamped) throw lastErr || new Error('no Nabla node reachable');
+    const url = URL.createObjectURL(new Blob([stamped], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'vbc.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setMsg('certificate registered — stamped vbc.json downloaded; copy it back to the validator', 'ok');
+  } catch (e) {
+    const m = (e && (e.message || e.msg)) || String(e);
+    out.textContent += `refused: ${m}\n`;
+    setMsg(`registration failed: ${m}`, 'err');
+  } finally { btn.disabled = false; }
 };
 
 $('ov-claim').onclick = () => runGenesisClaim({
