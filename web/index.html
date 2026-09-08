@@ -148,6 +148,9 @@
   <!-- Onboarding. REAL email is the default; the dev class is opt-in. -->
   <div id="onboard" class="card hidden">
     <h2>Create your wallet</h2>
+    <!-- §5.5 step 2 — validator-setup launched this page with the validator's
+         NAME. Decision 3: the wallet names are DERIVED from it, never typed. -->
+    <p id="o-setup-banner" class="muted hidden" style="margin:.1rem 0 .9rem;padding:.55rem .7rem;border:1px solid var(--accent);border-radius:6px"></p>
     <p class="muted" style="margin:.1rem 0 .9rem">Your wallet is addressed by a <b>real email address</b> you control. Sending works from here: the round rides a held connection to the validators.</p>
     <p class="muted" style="margin:.1rem 0 .9rem;padding:.55rem .7rem;border:1px solid var(--warn);border-radius:6px">⚠ <b>Receiving does not work in a browser yet.</b> Your cheque is <b>mailed</b> to the address above, and a web page cannot read a mailbox (no raw TCP, no mail protocols). So a claim or an incoming payment will be <b>sent but not collected</b> until you open this wallet in a client that has a mail transport — or until browser pickup ships. Export the wallet from Settings to move it.</p>
 
@@ -1030,6 +1033,23 @@ function refreshWalletPicker() {
 }
 if (refreshWalletPicker().length > 0) { show('unlock'); $('u-key').focus(); }
 else { show('onboard'); }
+
+// §5.5 step 2 — launched by validator-setup on the validator's loopback with
+// `?validator=<name>&setup=1`. The name is the validator's own (decision 3):
+// both wallets are named from it, <name>_Stake first. textContent, never HTML —
+// the query string is operator-controlled but still input.
+{
+  const q = new URLSearchParams(location.search);
+  const vname = (q.get('validator') || '').trim();
+  if (vname && q.get('setup') === '1') {
+    const b = $('o-setup-banner');
+    b.textContent = `Validator setup: ${vname} — this validator needs two wallets, ` +
+      `${vname}_Stake (the stake, locked once claimed) and ${vname}_Operational ` +
+      `(fees, day-to-day). Create ${vname}_Stake first; the name is filled in below.`;
+    b.classList.remove('hidden');
+    if ($('o-name').value === 'my-wallet') $('o-name').value = `${vname}_Stake`;
+  }
+}
 
 function renderOverview() {
   const info = wallet.info();
