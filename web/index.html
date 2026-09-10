@@ -147,12 +147,12 @@
 
   <!-- Onboarding. REAL email is the default; the dev class is opt-in. -->
   <div id="onboard" class="card hidden">
-    <h2>Create your wallet</h2>
+    <h2 id="o-title">Create your wallet</h2>
     <!-- §5.5 step 2 — validator-setup launched this page with the validator's
          NAME. Decision 3: the wallet names are DERIVED from it, never typed. -->
     <p id="o-setup-banner" class="muted hidden" style="margin:.1rem 0 .9rem;padding:.55rem .7rem;border:1px solid var(--accent);border-radius:6px"></p>
-    <p class="muted" style="margin:.1rem 0 .9rem">Your wallet is addressed by a <b>real email address</b> you control. Sending works from here: the round rides a held connection to the validators.</p>
-    <p class="muted" style="margin:.1rem 0 .9rem;padding:.55rem .7rem;border:1px solid var(--warn);border-radius:6px">⚠ <b>Receiving does not work in a browser yet.</b> Your cheque is <b>mailed</b> to the address above, and a web page cannot read a mailbox (no raw TCP, no mail protocols). So a claim or an incoming payment will be <b>sent but not collected</b> until you open this wallet in a client that has a mail transport — or until browser pickup ships. Export the wallet from Settings to move it.</p>
+    <p class="muted setup-hide" style="margin:.1rem 0 .9rem">Your wallet is addressed by a <b>real email address</b> you control. Sending works from here: the round rides a held connection to the validators.</p>
+    <p class="muted setup-hide" style="margin:.1rem 0 .9rem;padding:.55rem .7rem;border:1px solid var(--warn);border-radius:6px">⚠ <b>Receiving does not work in a browser yet.</b> Your cheque is <b>mailed</b> to the address above, and a web page cannot read a mailbox (no raw TCP, no mail protocols). So a claim or an incoming payment will be <b>sent but not collected</b> until you open this wallet in a client that has a mail transport — or until browser pickup ships. Export the wallet from Settings to move it.</p>
 
     <!-- §5.5 step 4 — VALIDATOR SETUP MODE (decisions 1–4 + the 2026-09-08
          rulings): BOTH wallets are created here from the validator's name;
@@ -160,24 +160,31 @@
          passphrase. Names are derived, never typed. Two DISTINCT addresses —
          a wallet is its own mailbox, never shared. -->
     <div id="o-vsetup" class="hidden">
+      <div id="vs-addresses" style="margin:.2rem 0 .9rem;padding:.6rem .75rem;border:1px solid var(--accent);border-radius:6px">
+        <div style="margin:.15rem 0"><b>Validator</b> <span id="vs-validator-email" style="font-family:monospace;font-weight:700;color:var(--accent)"></span><br><span class="muted">Its mailbox: what other validators and clients write to.</span><br><b>Validator id</b> <span id="vs-validator-id" style="font-family:monospace;font-weight:700;color:var(--accent)"></span><br><span class="muted">The identity the certificate is issued to.</span></div>
+        <div style="margin:.4rem 0 .15rem"><b>Stake wallet address</b> <span id="vs-stake-email-top" style="font-family:monospace;font-weight:700;color:var(--accent)"></span><br><span class="muted">Receives the certificate and holds the stake.</span></div>
+        <div style="margin:.4rem 0 .15rem"><b>Operational wallet address</b> <span id="vs-op-email-top" style="font-family:monospace;font-weight:700;color:var(--accent)"></span><br><span class="muted">Day-to-day funds: fees in, costs out.</span></div>
+      </div>
       <h3 style="margin:.2rem 0 .4rem">Stake wallet — <span id="vs-stake-name" style="font-family:monospace"></span></h3>
-      <p class="muted" style="margin:.1rem 0 .5rem">Holds the stake. Once a subsidy is claimed it is locked; it can still receive but cannot send. Give it its own address and its own passphrase.</p>
-      <label>Stake wallet email</label>
+      <p class="muted" style="margin:.1rem 0 .5rem">Holds the stake. Locked while staked.</p>
+      <label>Address</label>
+      <div id="vs-stake-email-fixed" class="hidden" style="font-family:monospace;margin:.1rem 0 .5rem"></div>
       <input id="vs-stake-email" placeholder="stake@example.com" inputmode="email" autocomplete="off" />
-      <label>Stake wallet key (passphrase)</label><input id="vs-stake-key" type="password" placeholder="strong passphrase" />
+      <label>Passphrase</label><input id="vs-stake-key" type="password" placeholder="strong passphrase" />
       <label>Confirm</label><input id="vs-stake-key2" type="password" placeholder="re-enter passphrase" />
 
       <h3 style="margin:1rem 0 .4rem">Operational wallet — <span id="vs-op-name" style="font-family:monospace"></span></h3>
-      <p class="muted" style="margin:.1rem 0 .5rem">Fees earned, costs paid, day-to-day. Moves freely; replaceable later.</p>
-      <label>Operational wallet email</label>
+      <p class="muted" style="margin:.1rem 0 .5rem">Day-to-day funds: fees in, costs out.</p>
+      <label>Address</label>
+      <div id="vs-op-email-fixed" class="hidden" style="font-family:monospace;margin:.1rem 0 .5rem"></div>
       <input id="vs-op-email" placeholder="ops@example.com" inputmode="email" autocomplete="off" />
-      <label>Operational wallet key (passphrase)</label><input id="vs-op-key" type="password" placeholder="a different passphrase" />
+      <label>Passphrase</label><input id="vs-op-key" type="password" placeholder="a different passphrase" />
       <label>Confirm</label><input id="vs-op-key2" type="password" placeholder="re-enter passphrase" />
 
       <div style="margin-top:1rem" class="row">
-        <button id="vs-create">Create both wallets</button>
+        <button id="vs-create">Create wallets and continue</button>
       </div>
-      <p class="muted" style="margin-top:.8rem">Both wallets are created in this browser, encrypted at rest under their own keys. Next step is the hand-off to the validator — until that intake exists, export each wallet file from its Validator tab and copy it to the validator.</p>
+      <p id="vs-next" class="muted" style="margin-top:.8rem"></p>
     </div>
 
     <div id="o-standard">
@@ -1105,22 +1112,46 @@ async function handOffToValidator(role, name, email, w) {
   const q = new URLSearchParams(location.search);
   const vname = (q.get('validator') || '').trim();
   if (vname && q.get('setup') === '1') {
+    // Operator-facing, not developer-facing (Sonny, 2026-09-09): say WHICH
+    // validator's certificate is being produced and what to do now.
     const b = $('o-setup-banner');
-    b.textContent = `Validator setup: ${vname} — this validator needs two wallets, ` +
-      `${vname}_Stake (the stake, locked once claimed) and ${vname}_Operational ` +
-      `(fees, day-to-day). Create ${vname}_Stake first; the name is filled in below.`;
+    $('o-title').textContent = `Set up validator ${vname}`;
+    document.querySelectorAll('.setup-hide').forEach(el => el.classList.add('hidden'));
+    b.textContent = `Producing the certificate for ${vname}. Step 1 of 2 — create its two wallets: ` +
+      `${vname}_Stake and ${vname}_Operational. Enter a passphrase for each.`;
     b.classList.remove('hidden');
     if ($('o-name').value === 'my-wallet') $('o-name').value = `${vname}_Stake`;
-    // Step 4: the two-wallet form replaces the single-wallet form. The
-    // validator's own address (its `--email`) is only a HINT for the
-    // operational wallet — both addresses are the operator's to type.
+    // Step 4: the two-wallet form replaces the single-wallet form. Both
+    // addresses come pre-filled from validator.toml (`stake_email`, and
+    // `email` for the operational wallet) — editable; the same address for
+    // both is fine (Sonny, 2026-09-09: ids are address ‖ key-suffix).
     $('vs-stake-name').textContent = `${vname}_Stake`;
     $('vs-op-name').textContent = `${vname}_Operational`;
-    const hint = (q.get('email') || '').trim().toLowerCase();
-    if (hint && REAL_EMAIL_RE.test(hint)) $('vs-op-email').value = hint;
+    // Addresses supplied by validator.toml are SHOWN, not asked again (Sonny,
+    // 2026-09-09: "should be just asking for password"). The input keeps the
+    // value so the create handler reads it unchanged.
+    const opHint = (q.get('email') || '').trim().toLowerCase();
+    const stakeHint = (q.get('stake_email') || opHint).trim().toLowerCase();
+    const validatorHint = (q.get('validator_email') || '').trim().toLowerCase();
+    // Each address, highlighted, with its purpose (Sonny, 2026-09-09).
+    $('vs-validator-email').textContent = validatorHint || '(not supplied)';
+    const vid = (q.get('validator_id') || '').trim().toLowerCase();
+    $('vs-validator-id').textContent = vid ? vid.slice(0, 16) + '…' : '(assigned by the validator)';
+    if (vid) $('vs-validator-id').title = vid;
+    $('vs-stake-email-top').textContent = stakeHint || '(type below)';
+    $('vs-op-email-top').textContent = opHint || '(type below)';
+    const fix = (inputId, fixedId, v) => {
+      if (!(v && REAL_EMAIL_RE.test(v))) return;
+      $(inputId).value = v; $(inputId).classList.add('hidden');
+      $(fixedId).textContent = v; $(fixedId).classList.remove('hidden');
+    };
+    fix('vs-stake-email', 'vs-stake-email-fixed', stakeHint);
+    fix('vs-op-email', 'vs-op-email-fixed', opHint);
+    $('vs-next').textContent = `Step 2 — the validator requests the certificate for ${vname}; ` +
+      `it arrives by email at ${stakeHint || 'the stake wallet address'}.`;
     $('o-standard').classList.add('hidden');
     $('o-vsetup').classList.remove('hidden');
-    $('vs-stake-email').focus();
+    ($('vs-stake-email').classList.contains('hidden') ? $('vs-stake-key') : $('vs-stake-email')).focus();
   }
 }
 
@@ -1319,7 +1350,9 @@ $('vs-create').onclick = async () => {
     if (!REAL_EMAIL_RE.test(em)) { setMsg(`Enter a valid ${what} wallet email (you@example.com).`, 'err'); $(id).focus(); return; }
     if (em.endsWith(`@${DEV_DOMAIN}`)) { setMsg(`@${DEV_DOMAIN} is the developer class — not for a validator's wallets.`, 'err'); $(id).focus(); return; }
   }
-  if (stakeEmail === opEmail) { setMsg('The two wallets need two DIFFERENT addresses — a wallet is its own mailbox, never shared.', 'err'); $('vs-op-email').focus(); return; }
+  // Same address for both is FINE (Sonny, 2026-09-09): a wallet id is
+  // email ‖ key-derived suffix, and every receiver filters on the FULL id —
+  // two wallets in one mailbox never mix. (A refusal lived here until then.)
   if (!sk) { setMsg('Enter the stake wallet key.', 'err'); $('vs-stake-key').focus(); return; }
   if (sk !== sk2) { setMsg('Stake wallet keys do not match.', 'err'); $('vs-stake-key2').focus(); return; }
   if (!ok) { setMsg('Enter the operational wallet key.', 'err'); $('vs-op-key').focus(); return; }
@@ -1330,10 +1363,12 @@ $('vs-create').onclick = async () => {
   $('vs-create').disabled = true;
   try {
     const w1 = await createWalletLocal(stakeName, stakeEmail, sk);
+    const id1 = (w1.info().address || stakeEmail);
     const h1 = await handOffToValidator('stake', stakeName, stakeEmail, w1);
     try { w1.close(); } catch (_) {}
     VAULT.lock();
     const w2 = await createWalletLocal(opName, opEmail, ok);
+    const id2 = (w2.info().address || opEmail);
     const h2 = await handOffToValidator('operational', opName, opEmail, w2);
     try { w2.close(); } catch (_) {}
     VAULT.lock();
@@ -1341,10 +1376,12 @@ $('vs-create').onclick = async () => {
     refreshWalletPicker();
     $('u-wallet').value = stakeName;
     show('unlock');
+    const vname = (new URLSearchParams(location.search).get('validator') || '').trim();
     const handed = h1 && h2
-      ? ` Handed to the validator: ${h1.path} and ${h2.path} — it continues its setup from those files.`
-      : ` Next: hand them to the validator — export each wallet file from its Validator tab (this page was not opened by validator-setup, so there is no intake to post to).`;
-    setMsg(`Both wallets created: ${stakeName} (${stakeEmail}) and ${opName} (${opEmail}). Open either with its own key.` + handed, 'ok');
+      ? ` Handed to the validator. Step 2 — the certificate for ${vname} is being produced by the validator; it arrives by email at ${stakeEmail}.`
+      : ` Next: hand them to the validator — export each wallet file from its Validator tab (this page was not opened by validator-setup).`;
+    // Wallet IDS (address ‖ key-suffix), not bare addresses (Sonny, 2026-09-09).
+    setMsg(`Wallets created: ${stakeName} (${id1}) and ${opName} (${id2}).` + handed, 'ok');
     toast('both wallets created');
   } catch (e) {
     VAULT.lock();
