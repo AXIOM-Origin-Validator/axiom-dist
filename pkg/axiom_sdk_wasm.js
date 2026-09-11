@@ -1065,9 +1065,10 @@ export function certificatePdfFromProof(proof, expected_core_id, expected_sdid) 
  * @param {Uint8Array | null | undefined} fact_chain
  * @param {Uint8Array} client_private_key
  * @param {number} now
+ * @param {Uint8Array | null} [fact_certificates_cbor]
  * @returns {Uint8Array}
  */
-export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, client_private_key, now) {
+export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, client_private_key, now, fact_certificates_cbor) {
     const ptr0 = passArray8ToWasm0(tx_json, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(current_state_json, wasm.__wbindgen_malloc);
@@ -1078,13 +1079,15 @@ export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, c
     var len3 = WASM_VECTOR_LEN;
     const ptr4 = passArray8ToWasm0(client_private_key, wasm.__wbindgen_malloc);
     const len4 = WASM_VECTOR_LEN;
-    const ret = wasm.cl1Run(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, now);
+    var ptr5 = isLikeNone(fact_certificates_cbor) ? 0 : passArray8ToWasm0(fact_certificates_cbor, wasm.__wbindgen_malloc);
+    var len5 = WASM_VECTOR_LEN;
+    const ret = wasm.cl1Run(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, now, ptr5, len5);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
-    var v6 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    var v7 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v6;
+    return v7;
 }
 
 /**
@@ -1758,7 +1761,7 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 283, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 301, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8);
             return ret;
         },
