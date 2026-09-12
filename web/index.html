@@ -1596,7 +1596,7 @@ $('s-send').onclick = async () => {
     const transport = mkTransport(host, 'witness');
     const params = {
       validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
-      k: 3,
+      // no k — the WASM derives it from the artifact (YP §17.3.1.4, KI#150)
       inboxNew: `${maildir}/inbox/new`,
       inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250,
@@ -1760,7 +1760,7 @@ $('s-scar-send').onclick = async () => {
     const transport = mkTransport(host, 'witness');
     const params = {
       validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
-      k: 3,
+      // no k — the WASM derives it from the artifact (YP §17.3.1.4, KI#150)
       inboxNew: `${maildir}/inbox/new`,
       inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250,
@@ -1982,7 +1982,7 @@ function recvParams() {
   const maildir = `${PARENT}/${wallet.info().name}/maildir`;
   return {
     validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
-    k: 3, inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
+    inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
     pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
   };
 }
@@ -2357,7 +2357,7 @@ async function runGenesisClaim({ amountAtoms, tier = 0, btn, out, authReason }) 
     const redeemTr = mkTransport(host, 'redeem');
     const common = {
       validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
-      k: 3,
+      // no k — the WASM derives it from the artifact (YP §17.3.1.4, KI#150)
       inboxNew: `${maildir}/inbox/new`,
       inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250,
@@ -2564,7 +2564,7 @@ $('ov-heal').onclick = async () => {
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const params = {
       validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
-      k: 3, inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
+      inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
     };
     const r = await withReceivePump(host, () => heal(wallet, mkTransport(host, 'witness'), params, stepProgress('Heal')));
@@ -2596,7 +2596,7 @@ $('ov-burn').onclick = async () => {
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const params = {
       validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
-      k: 3, inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
+      inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
     };
     const r = await withReceivePump(host, () => burnScars(wallet, mkTransport(host, 'witness'), params, stepProgress('Burn')));
@@ -2623,7 +2623,7 @@ async function runHalOp(opFn, label, btn, out, verb, ttype = 'witness') {
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const params = {
       validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
-      k: 3, inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
+      inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
     };
     const r = await withReceivePump(host, () => opFn(wallet, mkTransport(host, ttype), params, stepProgress(label)));

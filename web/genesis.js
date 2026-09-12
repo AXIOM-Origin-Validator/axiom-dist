@@ -16,7 +16,7 @@
 //   reference,       // string — e.g. "sdk"
 //   offeredFee,      // BigInt — atoms (>= MIN_OFFERED_FEE)
 //   validators,      // [{ validatorId: hex64, email }]   (TOT-supported only)
-//   k,               // number — witnesses required (3 for genesis)
+//   (no k — the WASM derives the round's k from the artifact, YP §17.3.1.4 KI#150)
 //   inboxNew,        // "maildir/inbox/new"
 //   inboxCur,        // "maildir/inbox/cur"
 //   pollIntervalMs,  // number — inbox poll backoff
@@ -70,7 +70,7 @@ export async function claimGenesis(wallet, transport, params, onStep) {
 
 // Redeem a stored cheque bundle: redeemFund (async/network) → commitRedeem
 // (sync/local credit). Same fund→commit split rationale as claimGenesis.
-// `redeemParams`: { validators, k, nablaTcpAddresses, inboxNew, inboxCur,
+// `redeemParams`: { validators, nablaTcpAddresses, inboxNew, inboxCur,
 // pollIntervalMs, pollMaxRounds }. Returns the credited balance.
 export async function redeem(wallet, transport, chequeId, redeemParams, onStep) {
   const before = wallet.balance; // BigInt — to compute the credited delta
@@ -107,7 +107,7 @@ export async function claimAndRedeem(wallet, transport, claimParams, redeemParam
 
 // Normal send: sendFund (async/network — build TX → CL1 → k-witness round
 // over TOT → register) → commitSend (sync/local debit). `amountAtoms` is a
-// BigInt; `params` = { validators, k, nablaTcpAddresses, inboxNew, inboxCur,
+// BigInt; `params` = { validators, nablaTcpAddresses, inboxNew, inboxCur,
 // pollIntervalMs, pollMaxRounds }. Returns the new (debited) balance.
 export async function send(wallet, transport, to, amountAtoms, reference, params, onStep) {
   return await sendInner(wallet, transport, to, amountAtoms, reference, params, onStep);

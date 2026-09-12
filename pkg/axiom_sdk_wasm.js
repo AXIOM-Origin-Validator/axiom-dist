@@ -190,7 +190,8 @@ export class Wallet {
      * the `&mut self` borrow that a browser `Promise` can't hold.
      *
      * `params` is `{ amount, reference, offeredFee, validators: [{validatorId
-     * (hex), email}], k, inboxNew, inboxCur, pollIntervalMs, pollMaxRounds }`.
+     * (hex), email}], inboxNew, inboxCur, pollIntervalMs, pollMaxRounds }`
+     * (no `k` — derived from the wallet's own address, KI#150).
      * `amount` / `offeredFee` are BigInt.
      * @param {any} transport
      * @param {any} params
@@ -765,7 +766,7 @@ export class Wallet {
      * the SAME outcome shape as `sendFund` — pass it to [`Wallet::commit_send`].
      * Errors with `WalletStateStale` if the wallet moved since the interruption
      * (the round is discarded; nothing from it was committed). `params` is the
-     * same shape `sendFund` takes (validators, k, nablaTcpAddresses, inbox
+     * same shape `sendFund` takes (validators, nablaTcpAddresses, inbox
      * paths, poll settings); the recipient / amount / reference come from the
      * persisted round.
      * @param {any} transport
