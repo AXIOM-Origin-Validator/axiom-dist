@@ -26,6 +26,26 @@
 #   for an address-propagation bug in nabla — the lists were correct.)
 # ═══════════════════════════════════════════════════════════════════════════
 #
+# ⚠ EMAIL ADDRESSES HERE ARE THE PUBLIC ONES, AND THAT IS LOAD-BEARING.
+# This file is read by REAL EXTERNAL CLIENTS only — the macOS wallet (bundled
+# in the .app, and refreshed from axiom-dist) and the webclient. Nothing
+# in-environment reads it: soak_test_v2.py WRITES its own list into the app dir
+# (~:2322) and the VBC gates copy theirs from soak-test-v2-data/.
+#
+# So every address in the `carriers` column MUST resolve on the PUBLIC
+# Internet. `<node>@axiom` does not — it is the in-env FATMAMA form, and a
+# client on a real MTA gets `NoMxHostFoundException` at its own provider
+# before the message ever leaves. That is asynchronous: the send appears to
+# succeed and the DSN arrives minutes later, so an unreachable address in this
+# list is a SILENT TIMEOUT, never a failover. Do not "helpfully" re-add the
+# @axiom forms alongside these — a client picks an address of the kind and has
+# no way to know one of them is a black hole.
+#
+# Corrected 2026-09-12: every row said `email:<node>@axiom`. The fleet gained
+# `<node>@trustmesh.org` inbound on 2026-09-10 (all ten verified) but this file
+# was never updated, so no external wallet could reach any validator — a real
+# claim bounced with exactly the error above. MX: trustmesh.org -> Purelymail.
+#
 # AXIOM validator seed list — 6-column format
 #
 #   "name", "validator_id (64 hex = blake3(sphincs_pk))", "ed25519_pk (64 hex, or empty)",
@@ -41,13 +61,13 @@
 # 2026-09-11: no DMG was built in that window). Attribute rulings by role here,
 # never by name.
 #
-"alpha", "39afd6a1b4a9fee2c44f9c60b96b5b2048ed4db3d5e9a704b21c077469e72f15", "a61dc74c4e6f680817df2d7df4c9c28e36a7ecd5e18d21932e17d89ae4ef853b", "dmap", "0.1%", "email:alpha@axiom, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7400, uncle:axiom-dev.mooo.com:9301"
-"beta", "c9f0502959c5d220077d2a781c63eee5c09e645a732ba377a2f49acc2eb22236", "77589adb4c85ca7c18383318905ffc8f6111d5a9864c964405374ffb18f1b86f", "dmap", "0.1%", "email:beta@axiom, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7401"
-"delta", "b997f47b7054c74630cda13e65d8c881461687d2d83f1997c72d536f8941ed2d", "0f0aba46e08ea1d8c95d7f58824f9db5bd97cfe84c25143c875243f3f67f3a8b", "dmap", "0.1%", "email:delta@axiom, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7403"
-"epsilon", "56afd350f72d89f542013efc245941fb4a148056b201fe5578428903f1e32d42", "c00758ad8d22b4d0bd1d0ce34d95bd37ecc3b65b8a63e780ef403cc9a305fb2c", "dmap", "0.1%", "email:epsilon@axiom, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7404, uncle:axiom-dev.mooo.com:9305"
-"eta", "e9aee711d6b3487fc6c0769805967b4b0b186a124568e0ff65ddb0c34a90fc62", "e8b271445b4d92e22242c51265b01197d9af14d878d8ece8ce24ca6647d75364", "dmap", "0.1%", "email:eta@axiom, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7406"
-"gamma", "83cabd196228fb2474b8c63259f6f7a442f9647f9e54945b2c3a668b215abd0a", "4b3325d4cc317e7293350feadddf7755c1e70259fb15dedbedbc483982822f7a", "dmap", "0.1%", "email:gamma@axiom, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7402, uncle:axiom-dev.mooo.com:9303"
-"iota", "3cfe3076801ba3150cbe70ac1cdc02a393ef53bc0a78764c860a4ec5b1495600", "e15ff5e9308d63ac465ace9bd791bb6451fd018e0d648c27a2e0077e5a7f659d", "dmap", "0.1%", "email:iota@axiom, fatmama:axiom-iota.mooo.com:2525, tot:axiom-iota.mooo.com:7408"
-"kappa", "ebc58774adb28e5c80a81dce0b9411c25fd35c23be31ace983dffb53765e22f3", "d38744e3433c61e420b465e6d834581025260bf4e11034fc6de2203deef38bbc", "dmap", "0.1%", "email:kappa@axiom, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7409, uncle:axiom-dev.mooo.com:9310"
-"theta", "d52c43af47df6985e861a8c08d903e80c7a415dd1144c360d4dd73f5ec0e4fed", "039aac93b7c0d7c328522d5de34a3082182b335fb5147077a0adc31f2fe709ce", "dmap", "0.1%", "email:theta@axiom, fatmama:axiom-theta.mooo.com:2525, tot:axiom-theta.mooo.com:7407"
-"zeta", "c9961ad68a207dfa2ecbb7e38d6109f8100ee2f40873c6cffbe59680db28aae4", "acd17f5b3cb8bd017648ba3d05948fe1f1f5af085afec2a401624992d109ed6a", "dmap", "0.1%", "email:zeta@axiom, fatmama:axiom-zeta.mooo.com:2525, tot:axiom-zeta.mooo.com:7405"
+"alpha", "39afd6a1b4a9fee2c44f9c60b96b5b2048ed4db3d5e9a704b21c077469e72f15", "a61dc74c4e6f680817df2d7df4c9c28e36a7ecd5e18d21932e17d89ae4ef853b", "dmap", "0.1%", "email:alpha@trustmesh.org, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7400, uncle:axiom-dev.mooo.com:9301"
+"beta", "c9f0502959c5d220077d2a781c63eee5c09e645a732ba377a2f49acc2eb22236", "77589adb4c85ca7c18383318905ffc8f6111d5a9864c964405374ffb18f1b86f", "dmap", "0.1%", "email:beta@trustmesh.org, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7401"
+"delta", "b997f47b7054c74630cda13e65d8c881461687d2d83f1997c72d536f8941ed2d", "0f0aba46e08ea1d8c95d7f58824f9db5bd97cfe84c25143c875243f3f67f3a8b", "dmap", "0.1%", "email:delta@trustmesh.org, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7403"
+"epsilon", "56afd350f72d89f542013efc245941fb4a148056b201fe5578428903f1e32d42", "c00758ad8d22b4d0bd1d0ce34d95bd37ecc3b65b8a63e780ef403cc9a305fb2c", "dmap", "0.1%", "email:epsilon@trustmesh.org, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7404, uncle:axiom-dev.mooo.com:9305"
+"eta", "e9aee711d6b3487fc6c0769805967b4b0b186a124568e0ff65ddb0c34a90fc62", "e8b271445b4d92e22242c51265b01197d9af14d878d8ece8ce24ca6647d75364", "dmap", "0.1%", "email:eta@trustmesh.org, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7406"
+"gamma", "83cabd196228fb2474b8c63259f6f7a442f9647f9e54945b2c3a668b215abd0a", "4b3325d4cc317e7293350feadddf7755c1e70259fb15dedbedbc483982822f7a", "dmap", "0.1%", "email:gamma@trustmesh.org, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7402, uncle:axiom-dev.mooo.com:9303"
+"iota", "3cfe3076801ba3150cbe70ac1cdc02a393ef53bc0a78764c860a4ec5b1495600", "e15ff5e9308d63ac465ace9bd791bb6451fd018e0d648c27a2e0077e5a7f659d", "dmap", "0.1%", "email:iota@trustmesh.org, fatmama:axiom-iota.mooo.com:2525, tot:axiom-iota.mooo.com:7408"
+"kappa", "ebc58774adb28e5c80a81dce0b9411c25fd35c23be31ace983dffb53765e22f3", "d38744e3433c61e420b465e6d834581025260bf4e11034fc6de2203deef38bbc", "dmap", "0.1%", "email:kappa@trustmesh.org, fatmama:axiom-dev.mooo.com:2525, tot:axiom-dev.mooo.com:7409, uncle:axiom-dev.mooo.com:9310"
+"theta", "d52c43af47df6985e861a8c08d903e80c7a415dd1144c360d4dd73f5ec0e4fed", "039aac93b7c0d7c328522d5de34a3082182b335fb5147077a0adc31f2fe709ce", "dmap", "0.1%", "email:theta@trustmesh.org, fatmama:axiom-theta.mooo.com:2525, tot:axiom-theta.mooo.com:7407"
+"zeta", "c9961ad68a207dfa2ecbb7e38d6109f8100ee2f40873c6cffbe59680db28aae4", "acd17f5b3cb8bd017648ba3d05948fe1f1f5af085afec2a401624992d109ed6a", "dmap", "0.1%", "email:zeta@trustmesh.org, fatmama:axiom-zeta.mooo.com:2525, tot:axiom-zeta.mooo.com:7405"
