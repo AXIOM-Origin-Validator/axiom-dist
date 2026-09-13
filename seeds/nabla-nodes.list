@@ -23,7 +23,7 @@
 #  report editing it as a fix. Fix the node or the code, then leave this
 #  list alone.
 #
-#  (Sonny, 2026-08-18, after an agent spent a session blaming this file for
+#  (Project owner's ruling, 2026-08-18, after an agent spent a session blaming this file for
 #   an address-propagation bug in nabla — the list was correct throughout.)
 # ═══════════════════════════════════════════════════════════════════════════
 #
@@ -35,6 +35,12 @@
 #              the HTTP port is derived as tcp_port - 1074 (sdk/client/src/nabla.rs).
 #
 # Single source — edit directly, no generator. '#' lines are comments.
+# ⚠ These two seed files are BUNDLED INSIDE the shipped macOS .app, and
+# release-dmg.sh's identity-leak guard refuses to package a bundle containing
+# the builder's username ANYWHERE — comments included. A personal name in this
+# header therefore FAILS the Mac build (it did, silently, from 2026-08-18 until
+# 2026-09-11: no DMG was built in that window). Attribute rulings by role here,
+# never by name.
 "alpha", "", "TCP:axiom-dev.mooo.com:7300"
 "beta", "", "TCP:axiom-dev.mooo.com:7301"
 "gamma", "", "TCP:axiom-dev.mooo.com:7302"
