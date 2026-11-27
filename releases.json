@@ -6,8 +6,8 @@
       "core_id": "eb97d093a4977e67f9efbbfca90fbcc078a04e6ffcb9715d7d5e4bdb22957c31",
       "dmg": "AxiomWallet.dmg",
       "url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/latest/download/AxiomWallet.dmg",
-      "sha256": "0f517d92480dc56151c5b069fe1d755e946240e7aa0a4415951c2c6ddf9f2e88",
-      "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/axiomwallet-eb97d093-2.39.1-20261127"
+      "sha256": "446414c7bebcaa7eb8106afa14fdf8f2c94c515c869c8d88d24e70a7fb801496",
+      "notes_url": "https://github.com/AXIOM-Origin-Validator/axiom-dist/releases/tag/axiomwallet-eb97d093-2.39.1-20261127-kiddo2.17.1"
     },
     "unclesam": {
       "version": "0.3.1",
