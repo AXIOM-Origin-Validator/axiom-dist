@@ -19,7 +19,7 @@
 //        TOT polls that directory and pumps each reply back down THE SAME SOCKET
 //   client <--(binary reply frame)-- TOT /session
 //
-// AXIOM_DESIGN_TOT.md §5.4, YPX-023 §3.3. So this file is small on purpose: it
+// AXIOM_YPX-027_TOT.md §5.4, YPX-023 §3.3. So this file is small on purpose: it
 // holds the socket, and lands what arrives into the inbox the machines already
 // read. It decodes no protocol bytes.
 //

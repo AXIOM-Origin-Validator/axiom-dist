@@ -22,6 +22,53 @@ export class Wallet {
         wasm.__wbg_wallet_free(ptr, 0);
     }
     /**
+     * KI#451 `abandon_recall` (ruling 2026-10-30; YP-SDK §8.4.0f) — give up a recall whose
+     * head is still queued (`txidHex` = the head's txid or the recalled payment's): the
+     * `RecallHeadPending` barrier lifts, the recall can never commit, its recall cheque is
+     * quarantined; the receiver redeems once the reservation lapses. Returns
+     * `{ headTxid, targetTxid, quarantined }`; throws `NoPendingRecall` when nothing matches.
+     * @param {string} txid_hex
+     * @returns {any}
+     */
+    abandonRecall(txid_hex) {
+        const ptr0 = passStringToWasm0(txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_abandonRecall(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * DeclaredWitnessSet (spec §4 verbs) — EXPLICITLY abandon the saved round of
+     * `kind` (`"send"` | `"redeem"` | `"heal"` | `"recall"` | `"claim"` — the native
+     * `rounds::parse_round_kind` spellings): the application's decision, never the
+     * SDK's. Returns whether a record was on file. `"send"` = `discardResumableSend`,
+     * `"redeem"` = `discardPendingRedeem` (the §4.6a marker). Abandoning does not undo a
+     * signature a member already gave — the report's `newSetAdmissible` /
+     * `healAvailable` say what is admissible.
+     * KI#300 (fixed 2026-10-09): `"send"` records the round's signers as poisoned
+     * committers + the tip as garbage through the SAME core builder native
+     * `rounds::abandon_round` uses (`Wallet::record_abandoned_round`), then saves.
+     * KI#322 (fixed 2026-11-09): `"heal"` / `"recall"` record the kept REPORT of the last
+     * incomplete heal-family round (`round::take_pending_heal_report` — the browser keeps
+     * the report, not a resumable round: resume is KI#378) through the SAME core builder
+     * (`Wallet::record_abandoned_round`) native uses; `false` = no report on file.
+     * `"claim"` answers `false`: no claim round is ever kept (KI#488 (b)). ~~`"recall"` was an unknown kind here~~ (an app written to
+     * the native spelling got an error for the kind native accepts).
+     * @param {string} kind
+     * @returns {boolean}
+     */
+    abandonRound(kind) {
+        const ptr0 = passStringToWasm0(kind, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_abandonRound(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * Primary wallet address (Standard tier, k=3).
      * @returns {string}
      */
@@ -73,34 +120,25 @@ export class Wallet {
         }
     }
     /**
-     * §6b — apply Nabla's reply to the certificate: on OK returns the STAMPED
-     * `vbc.json` text (verified under Core's rules first); a refusal throws
-     * with Nabla's status and reason verbatim.
-     * @param {string} vbc_json
+     * §6b — apply Nabla's reply to the certificate: on OK returns the bundle with its
+     * target STAMPED (verified under Core's rules first), as `vbc-bundle.cbor` bytes; a
+     * refusal throws with Nabla's status and reason verbatim.
+     * @param {Uint8Array} bundle_cbor
      * @param {Uint8Array} response
-     * @returns {string}
+     * @returns {Uint8Array}
      */
-    applyRegisterVbcResponse(vbc_json, response) {
-        let deferred4_0;
-        let deferred4_1;
-        try {
-            const ptr0 = passStringToWasm0(vbc_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passArray8ToWasm0(response, wasm.__wbindgen_malloc);
-            const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.wallet_applyRegisterVbcResponse(this.__wbg_ptr, ptr0, len0, ptr1, len1);
-            var ptr3 = ret[0];
-            var len3 = ret[1];
-            if (ret[3]) {
-                ptr3 = 0; len3 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred4_0 = ptr3;
-            deferred4_1 = len3;
-            return getStringFromWasm0(ptr3, len3);
-        } finally {
-            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    applyRegisterVbcResponse(bundle_cbor, response) {
+        const ptr0 = passArray8ToWasm0(bundle_cbor, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(response, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_applyRegisterVbcResponse(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
         }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
     }
     /**
      * Current balance in atoms.
@@ -114,16 +152,37 @@ export class Wallet {
         return BigInt.asUintN(64, ret[0]);
     }
     /**
+     * YPX-026 §4 step 3 — BLESS (mirror of native `redeem::bless`): a PRIEST redeems its own
+     * PRIEST fee `cheque_id` with the explicit, receiver-signed `bless` flag — the claim and
+     * the redeem together, exactly as [`Wallet::redeem_fund`] (same `params`, same result;
+     * commit it with [`Wallet::commit_redeem`]). The ONLY setter of the flag in the browser.
+     * @param {any} transport
+     * @param {string} cheque_id
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    blessFund(transport, cheque_id, params, progress) {
+        const ptr0 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_blessFund(this.__wbg_ptr, transport, ptr0, len0, params, progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * §6b — build the signed `RegisterVbcRequest` bytes for the operator's
-     * `vbc.json` text, from THIS wallet's own view of itself. The browser
+     * certificate bundle file bytes (`vbc-bundle.cbor`, ValidatorJoin §6b.12), from
+     * THIS wallet's own view of itself. The browser
      * ships the bytes over `transport.nablaTcp(addr, bytes)` (it cannot block
      * on IO here) and hands the reply to `applyRegisterVbcResponse`.
      * Refuses when this wallet is not the certificate's stake wallet.
-     * @param {string} vbc_json
+     * @param {Uint8Array} bundle_cbor
      * @returns {Uint8Array}
      */
-    buildRegisterVbcRequest(vbc_json) {
-        const ptr0 = passStringToWasm0(vbc_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    buildRegisterVbcRequest(bundle_cbor) {
+        const ptr0 = passArray8ToWasm0(bundle_cbor, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.wallet_buildRegisterVbcRequest(this.__wbg_ptr, ptr0, len0);
         if (ret[3]) {
@@ -189,10 +248,10 @@ export class Wallet {
      * state, then register + redeem. The split keeps the network round off
      * the `&mut self` borrow that a browser `Promise` can't hold.
      *
-     * `params` is `{ amount, reference, offeredFee, validators: [{validatorId
+     * `params` is `{ amount, reference, validators: [{validatorId
      * (hex), email}], inboxNew, inboxCur, pollIntervalMs, pollMaxRounds }`
-     * (no `k` — derived from the wallet's own address, KI#150).
-     * `amount` / `offeredFee` are BigInt.
+     * (no `k` — derived from the wallet's own address, KI#150; no fee — the
+     * witness request carries no fee data, YP §19.6). `amount` is a BigInt.
      * @param {any} transport
      * @param {any} params
      * @param {any} progress
@@ -206,6 +265,11 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * ⚠ KI#398 (2026-10-24): NO LONGER CALLED by the webclient — `commitRedeem` applies the
+     * produced hibernation Core witnessed (`redeem_produced_terms`). Kept as an explicit
+     * application action only; calling it after a redeem whose receipt carries a
+     * hibernation writes a state that does not anchor. Original note follows.
+     *
      * YPX-020 §2: clear the local hibernation flag after the completion redeem.
      * Core's CL5 zeroes `hibernation_until` on the distress-cheque self-redeem
      * (the witnessed receipt carries hibernation=0), but `commitRedeem` /
@@ -221,6 +285,23 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[0]);
         }
     }
+    /**
+     * YPX-026 — drop the unsent-fee row of `escrowTxidHex` + `priest` (its fee was sent).
+     * @param {string} escrow_txid_hex
+     * @param {string} priest
+     * @returns {boolean}
+     */
+    clearUnsentTribunalFee(escrow_txid_hex, priest) {
+        const ptr0 = passStringToWasm0(escrow_txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(priest, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_clearUnsentTribunalFee(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
     close() {
         const ret = wasm.wallet_close(this.__wbg_ptr);
         if (ret[1]) {
@@ -232,21 +313,30 @@ export class Wallet {
      *
      * Advances wallet state with the [`Wallet::claim_genesis_fund`] outcome:
      * `produced_state_id`, balance 0 (credited at redeem), wallet_seq 1, the
-     * receipt + FACT chain. Atomic via `commit_protocol_transition`, then
-     * persists. After this, register the txid with Nabla and redeem the
-     * cheque bundle (the normal receive/redeem path).
+     * receipt + FACT chain, and `producedHibernationUntil` — the §5.2.2c stake
+     * lock window a tier-2/3 claim's state carries (0 for an airdrop). Atomic
+     * via `commit_protocol_transition`, then persists. After this, register
+     * the txid with Nabla and redeem the cheque bundle (the normal
+     * receive/redeem path).
+     *
+     * ⚠ The hibernation was NOT committed before 2026-10-02: the browser wallet
+     * kept its pre-round value (0), so a stake-claimed state disagreed with the
+     * k-signed receipt — the native path's 2026-09-06 failure
+     * (E_STAKE_LOCK_TIME_DISAGREEMENT at the redeem). `produced_hibernation_until`
+     * is REQUIRED (a stale page passing three arguments fails loudly).
      * @param {Uint8Array} produced_state_id
      * @param {Uint8Array} receipt_cbor
      * @param {Uint8Array} fact_chain_cbor
+     * @param {bigint} produced_hibernation_until
      */
-    commitGenesisFund(produced_state_id, receipt_cbor, fact_chain_cbor) {
+    commitGenesisFund(produced_state_id, receipt_cbor, fact_chain_cbor, produced_hibernation_until) {
         const ptr0 = passArray8ToWasm0(produced_state_id, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArray8ToWasm0(receipt_cbor, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passArray8ToWasm0(fact_chain_cbor, wasm.__wbindgen_malloc);
         const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wallet_commitGenesisFund(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        const ret = wasm.wallet_commitGenesisFund(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, produced_hibernation_until);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -276,6 +366,24 @@ export class Wallet {
         }
     }
     /**
+     * KI#334 item 1 — store the chain [`Wallet::resolve_inherited_scars_fund`] swept
+     * (`Wallet::set_fact_chain` + save — the API the native sweep uses; never a state
+     * transition). Refused — nothing written — when the wallet's chain is no longer the one the
+     * sweep started from (`preChainHashHex`): sweep again.
+     * @param {Uint8Array} fact_chain_cbor
+     * @param {string} pre_chain_hash_hex
+     */
+    commitInheritedSweep(fact_chain_cbor, pre_chain_hash_hex) {
+        const ptr0 = passArray8ToWasm0(fact_chain_cbor, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(pre_chain_hash_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_commitInheritedSweep(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * YPX-022 **commit phase** for a recall (sync, local): persists the
      * recall bookkeeping row (§2 "Record the recall", REQUIRED) and applies
      * the witnessed outcome — which stamps the recall hibernation window
@@ -290,8 +398,9 @@ export class Wallet {
      * @param {Uint8Array} recalled_state_id
      * @param {bigint} recall_amount
      * @param {bigint} recall_tick
+     * @param {Uint8Array} recall_bonds_cbor
      */
-    commitRecall(produced_state_id, new_balance, new_wallet_seq, receipt_cbor, fact_chain_cbor, hibernation_until, recalled_txid, recalled_state_id, recall_amount, recall_tick) {
+    commitRecall(produced_state_id, new_balance, new_wallet_seq, receipt_cbor, fact_chain_cbor, hibernation_until, recalled_txid, recalled_state_id, recall_amount, recall_tick, recall_bonds_cbor) {
         const ptr0 = passArray8ToWasm0(produced_state_id, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArray8ToWasm0(receipt_cbor, wasm.__wbindgen_malloc);
@@ -302,7 +411,9 @@ export class Wallet {
         const len3 = WASM_VECTOR_LEN;
         const ptr4 = passArray8ToWasm0(recalled_state_id, wasm.__wbindgen_malloc);
         const len4 = WASM_VECTOR_LEN;
-        const ret = wasm.wallet_commitRecall(this.__wbg_ptr, ptr0, len0, new_balance, new_wallet_seq, ptr1, len1, ptr2, len2, hibernation_until, ptr3, len3, ptr4, len4, recall_amount, recall_tick);
+        const ptr5 = passArray8ToWasm0(recall_bonds_cbor, wasm.__wbindgen_malloc);
+        const len5 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_commitRecall(this.__wbg_ptr, ptr0, len0, new_balance, new_wallet_seq, ptr1, len1, ptr2, len2, hibernation_until, ptr3, len3, ptr4, len4, recall_amount, recall_tick, ptr5, len5);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -311,14 +422,23 @@ export class Wallet {
      * Redeem **commit phase** (sync, local). Credits the balance from a
      * [`Wallet::redeem_fund`] outcome and durably marks the cheque redeemed
      * (double-redeem guard), then persists.
+     *
+     * KI#398 (2026-10-24): applies the produced state's `producedHibernationUntil` and
+     * `producedWallClockLock` (the outcome's, THE sdk-core rule `redeem_produced_terms` =
+     * Core's) BEFORE the transition, like `commitGenesisFund` — REQUIRED arguments (a stale
+     * page passing six fails loudly). ~~set neither~~: a HAL / RECALL completion relied on
+     * the page's `clearHibernation()` (applied to ANY redeemed cheque) and a stamped stake
+     * lock was never stored.
      * @param {Uint8Array} produced_state_id
      * @param {bigint} new_balance
      * @param {bigint} new_wallet_seq
      * @param {Uint8Array} receipt_cbor
      * @param {Uint8Array} fact_chain_cbor
      * @param {string} cheque_id
+     * @param {bigint} produced_hibernation_until
+     * @param {bigint} produced_wall_clock_lock
      */
-    commitRedeem(produced_state_id, new_balance, new_wallet_seq, receipt_cbor, fact_chain_cbor, cheque_id) {
+    commitRedeem(produced_state_id, new_balance, new_wallet_seq, receipt_cbor, fact_chain_cbor, cheque_id, produced_hibernation_until, produced_wall_clock_lock) {
         const ptr0 = passArray8ToWasm0(produced_state_id, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArray8ToWasm0(receipt_cbor, wasm.__wbindgen_malloc);
@@ -327,7 +447,7 @@ export class Wallet {
         const len2 = WASM_VECTOR_LEN;
         const ptr3 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.wallet_commitRedeem(this.__wbg_ptr, ptr0, len0, new_balance, new_wallet_seq, ptr1, len1, ptr2, len2, ptr3, len3);
+        const ret = wasm.wallet_commitRedeem(this.__wbg_ptr, ptr0, len0, new_balance, new_wallet_seq, ptr1, len1, ptr2, len2, ptr3, len3, produced_hibernation_until, produced_wall_clock_lock);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -351,6 +471,38 @@ export class Wallet {
         const ret = wasm.wallet_commitSend(this.__wbg_ptr, ptr0, len0, new_balance, new_wallet_seq, ptr1, len1, ptr2, len2);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * KI#400 (2026-10-24) — the **commit phase** of a send round ended by a partial-commit
+     * VERDICT: applies THE wallet transition native `send` applies
+     * (`Wallet::record_send_verdict` — every signer + the refuser poisoned; below two
+     * signers an `E_SABR_HASH_MISMATCH` also records the tip as garbage), then saves.
+     * `report_cbor` is the `verdictReportCbor` a `sendFund` / `resumeSend` rejection carries.
+     * Returns the transition kind (`"SubQuorum"` / `"ActiveRecovery"` / `"HealForward"` /
+     * `"Verdict"`). Not a decision: the protocol fact the refusal proved, recorded so the
+     * next send routes around the committers and `diagnose()` offers the heal.
+     * @param {Uint8Array} report_cbor
+     * @returns {string}
+     */
+    commitSendVerdict(report_cbor) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(report_cbor, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wallet_commitSendVerdict(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -414,12 +566,6 @@ export class Wallet {
         }
         return takeFromExternrefTable0(ret[0]);
     }
-    /**
-     * Abandon an outstanding interrupted redeem (§14 — user-initiated only).
-     * The guard must not be a terminal state: a wallet is unrecoverable ONLY
-     * if BANNED. Value-safe (the cheque stays redeemable); forfeits only the
-     * adoption bookkeeping, so the UI offers it strictly as the last resort.
-     */
     discardPendingRedeem() {
         const ret = wasm.wallet_discardPendingRedeem(this.__wbg_ptr);
         if (ret[1]) {
@@ -447,12 +593,80 @@ export class Wallet {
         }
     }
     /**
+     * KI#371 / YP §26.17.6.6 E6 — READ-ONLY envelope size bound (YP-SDK §4.6k, op
+     * `bound`): `{boundBytes, limitBytes, wouldRefuse}` — an UPPER bound on any op's mailed
+     * envelope from the current state (`envelope_size::wallet_envelope_bound`, the native
+     * rule). The browser machines refuse above `limitBytes` themselves.
+     * @returns {any}
+     */
+    envelopeSizePreview() {
+        const ret = wasm.wallet_envelopeSizePreview(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * KI#499 (ruled 2026-11-12) — the USER's explicit export of a cheque's claim bank
+     * (the k claim proofs + k attestations + the claim move), encoded by THE sdk-core encoder.
+     * The browser keeps the bank in memory only; this is how a user carries it to another
+     * session. `null` when this page holds no bank for the cheque.
+     * @param {string} cheque_id
+     * @returns {any}
+     */
+    exportClaimBank(cheque_id) {
+        const ptr0 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_exportClaimBank(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * KI#308 / KI#310 — THE dedicated override: the user INSISTS on moving the wallet
+     * while the claim of `chequeId` is pending, and gives the cheque up. SENDS the
+     * receiver-signed claim RELEASE to Nabla FIRST (`ChequeClaimReleaseMachine`, one
+     * `nablaTcp` per address until a node answers `RELEASED` — so the sender can recall
+     * once the released proof has expired, and this wallet can never claim the cheque
+     * again), then records the local consent (a StorageRead + StorageWrite of the
+     * records file through the same driver) that lifts the guard for that cheque only.
+     * Resolves to `{ node }`; rejects `ClaimReleaseNotRecorded` (retryable —
+     * nothing recorded) when no node took it, `ClaimReleaseRefused` (fatal) on a
+     * verdict. Never called by the SDK. ~~synchronous, local record only~~ (2026-10-10).
+     * @param {any} transport
+     * @param {Array<any>} addresses
+     * @param {string} cheque_id
+     * @returns {Promise<any>}
+     */
+    forfeitPendingChequeClaim(transport, addresses, cheque_id) {
+        const ptr0 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_forfeitPendingChequeClaim(this.__wbg_ptr, transport, addresses, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * KI#308 — the cheques LOST to a claim-then-move (claim bound to an earlier state);
+     * the page shows them as "lost" (with `forfeitConsented` = the user chose it).
+     * @returns {any}
+     */
+    forfeitedChequeClaims() {
+        const ret = wasm.wallet_forfeitedChequeClaims(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * YPX-020 HAL — RE-ANCHOR a healthy wallet whose prior witnesses are
      * unreachable (dead-overlap). A `kind=HalReanchor` self-send Core CL2
      * accepts WITHOUT the S-ABR overlap requirement; the produced state
      * carries a hibernation lock. Two-phase like heal: pass the result to
      * [`Wallet::commit_heal`] (which stamps `hibernationUntil`). Does NOT
-     * touch CLARA state. Client-initiated only (CLAUDE.md §14).
+     * touch CLARA state. Client-initiated only (architecture rule 14).
      * @param {any} transport
      * @param {any} params
      * @param {any} progress
@@ -520,6 +734,34 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * KI#499 — the USER's explicit import of an exported claim bank (THE sdk-core decoder), held
+     * in this page's memory. Refused unless it names a claim this wallet has on record. Nothing is
+     * exempted by the import: the guard lets a claimed wallet move only after Core's
+     * `ClaimMoveCheck` accepts the bank. Returns the cheque id.
+     * @param {Uint8Array} bytes
+     * @returns {string}
+     */
+    importClaimBank(bytes) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wallet_importClaimBank(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Wallet info as a plain JS object: `{name, address, addresses, email,
      * balance, sdkVersion}` where `addresses` is `[[tierName, address], ...]`
      * for all 7 YPX-007 security tiers.
@@ -531,6 +773,41 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * KI#216 INITIAL-ANCHOR (`docs/AXIOM_DESIGN_FirstAnchor.md`) — the wallet makes
+     * its OWN first, key-anchored state before it ever receives: the heal re-anchor
+     * run from the EMPTY state (`TxKind::Heal` self-send, amount 0, seq 0 → 1, no
+     * fee, k-witnessed, Nabla-registered). The browser counterpart of native
+     * `heal::initial_anchor` — same plan (sdk-core `Wallet::initial_anchor_plan`),
+     * same machine as `healFund`. Refuses a wallet with ANY history
+     * (`E_WALLET_ALREADY_ANCHORED`, before any IO). Two-phase like heal: pass the
+     * outcome to [`Wallet::commit_heal`] (`clearClara` false, `hibernationUntil` 0).
+     * USER-initiated only — the SDK never fires it (RULE 5 B); the application
+     * OFFERS it ("anchor before you share the address", design §3).
+     * @param {any} transport
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    initialAnchorFund(transport, params, progress) {
+        const ret = wasm.wallet_initialAnchorFund(this.__wbg_ptr, transport, params, progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * KI#216 — `true` once the wallet has ANY history (its state chain binds the
+     * owner's key, whatever made the first state: a claim, a redeem, a send or an
+     * initial anchor); `false` for a never-used wallet — the one unanchored moment.
+     * The SAME predicate `initialAnchorFund` refuses on (sdk-core
+     * `Wallet::has_history`). Display only — Core is the gate.
+     * @returns {boolean}
+     */
+    get isAnchored() {
+        const ret = wasm.wallet_isAnchored(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * YPX-022: fill `recall_cheque_id` on the recall record after the
@@ -554,16 +831,19 @@ export class Wallet {
         return ret[0] !== 0;
     }
     /**
-     * Query a Nabla node for a transaction's attestation.
+     * Query Nabla for a transaction's attestation.
      *
-     * Tries each address in turn and resolves with the first successful
-     * JSON response (parsed). Resolves with `null` if every address
-     * fails or returns non-JSON bytes. The Wallet itself is not read
-     * or written — this method is on the handle for JS-API symmetry
-     * with desktop.
+     * `addresses` are Nabla TCP `host:port` addresses. Each is asked in turn
+     * with a TCP-CBOR `QueryTxidRequest`, carried through TOT's
+     * `/nabla/<n>` tunnel (Nabla refuses functional HTTP). Resolves with the
+     * first `QueryTxidResponse` as a JS object (byte fields are number
+     * arrays), or `null` if no node answered with one. The response is
+     * UNVERIFIED — its Nabla signature is Core's to check. The Wallet itself
+     * is not read or written; this method is on the handle for JS-API
+     * symmetry with desktop.
      *
-     * `transport` must implement the [`JsAsyncTransport`] interface.
-     * See [`crate::transport`] for the JS-side shape.
+     * `transport` must implement the [`JsAsyncTransport`] interface
+     * (`nablaTcp`). See [`crate::transport`] for the JS-side shape.
      * @param {any} transport
      * @param {Array<any>} addresses
      * @param {string} txid_hex
@@ -577,6 +857,19 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * The TARDIS tick VALUE of the wallet's cached OODS reading (the latest a round or a
+     * refresh carried), or `null` before any. Guide §9.5: a maturity tick VALUE =
+     * `observedTick + count × tickIntervalSecs()` — refuse to build terms without it.
+     * @returns {bigint | undefined}
+     */
+    observedTick() {
+        const ret = wasm.wallet_observedTick(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        return ret[0] === 0 ? undefined : BigInt.asUintN(64, ret[1]);
     }
     /**
      * Open an existing wallet from a JS-side storage object.
@@ -594,15 +887,35 @@ export class Wallet {
         return Wallet.__wrap(ret[0]);
     }
     /**
+     * Abandon an outstanding interrupted redeem (§14 — user-initiated only).
+     * The guard must not be a terminal state: a wallet is unrecoverable ONLY
+     * if BANNED. Value-safe (the cheque stays redeemable); forfeits only the
+     * adoption bookkeeping, so the UI offers it strictly as the last resort.
+     * KI#304: the ONE discard (`Wallet::abandon_redeem_round`, sdk-core) — drops the
+     * marker + saved round and KEEPS the cheque's banked claim evidence.
+     * KI#308 — the §4.6 cheque claims pending at the wallet's CURRENT state (claimed at
+     * Nabla, not yet redeemed): `[{ chequeId, receiverStateIdHex, forfeitConsented, refused }]`
+     * (`refused` — KI#395: Core's code of a deterministic refusal after the claim, or `null`).
+     * While one is listed (and not forfeited) every state-moving op is refused
+     * `PendingChequeClaim`; the page shows "claim pending — redeem first" (YP §1B.5).
+     * @returns {any}
+     */
+    pendingChequeClaims() {
+        const ret = wasm.wallet_pendingChequeClaims(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * The cheque id of an outstanding interrupted redeem, or null (YP-SDK
      * §4.6a). While set, send() refuses and redeem() accepts ONLY this cheque
      * — the retry IS the recovery. Surfaced so the UI can name the blocking
      * cheque instead of showing an opaque refusal.
      *
-     * NOTE (phase-2 dependency): the browser's RedeemMachine does not yet
-     * WRITE this marker on a no-chain failure — the receive-half lands with
-     * the machine rebuild. Until then this reads markers written by a shared
-     * native wallet, and diagnose() carries the same fact as an action.
+     * NOTE: the browser's RedeemMachine saves its ROUND (KI#378) but writes no
+     * marker (a recorded KI#378 residual): this reads markers written by a
+     * shared native wallet; a browser-saved round is reported by `redeemFund`.
      * @returns {string | undefined}
      */
     pendingRedeemChequeId() {
@@ -618,11 +931,20 @@ export class Wallet {
         return v1;
     }
     /**
-     * The interrupted-but-resumable send round on this wallet, if one is still
-     * valid (the wallet hasn't moved since the timeout). Returns a plain JS
-     * object `{ to, amount, sigsHave, sigsNeeded, createdAtSecs }` or `null`.
-     * A stale / wrong-format round is cleaned up and reported as `null`. Cheap
-     * local read — safe to poll on pane entry / overview render.
+     * DeclaredWitnessSet (spec §4) — the wallet's SAVED witness rounds, each as its
+     * REPORT (see `roundReport` on a `RoundIncomplete` error). Only a send round is
+     * saved in the browser today (a WASM redeem / heal / claim round reports and is
+     * not saved — `canResume: false`). Cheap local read.
+     * @returns {any}
+     */
+    pendingRounds() {
+        const ret = wasm.wallet_pendingRounds(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Load the persisted paused send, if any. `null` when there is none.
      * `current: false` means the wallet moved since the pause — the stored
      * txid can no longer match, so a fresh send is required.
@@ -673,6 +995,54 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Fork Settlement W7e — record a fund outcome's register-ack provenance
+     * (`provenance`, `heldCheques`) on the wallet — mirror of native
+     * `register_with_nabla` recording it from every RegisterAck — so
+     * `diagnose()` offers the burn exit of a held state. Records only.
+     * @param {string} provenance
+     * @param {string[]} held_cheques
+     */
+    recordProvenance(provenance, held_cheques) {
+        const ptr0 = passStringToWasm0(provenance, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayJsValueToWasm0(held_cheques, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_recordProvenance(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * YPX-026 — record a PRIEST fee the browser's Tribunal sequence did not send, from the
+     * fee's `sendFund` error object (`code`, `recovery`, `message`). THE SDK rule decides
+     * (`send::fee_error_is_unsent_named`): a SAVED round (`RoundIncomplete` / `ResolveRound` /
+     * a timeout) is never "unsent" — it may still commit. Returns whether it was recorded.
+     * @param {string} escrow_txid_hex
+     * @param {string} priest
+     * @param {bigint} fee
+     * @param {string} code
+     * @param {string} recovery
+     * @param {string} message
+     * @returns {boolean}
+     */
+    recordUnsentTribunalFee(escrow_txid_hex, priest, fee, code, recovery, message) {
+        const ptr0 = passStringToWasm0(escrow_txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(priest, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(code, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(recovery, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passStringToWasm0(message, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_recordUnsentTribunalFee(this.__wbg_ptr, ptr0, len0, ptr1, len1, fee, ptr2, len2, ptr3, len3, ptr4, len4);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
     }
     /**
      * Scan a maildir inbox for cheques addressed to this wallet.
@@ -748,10 +1118,106 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * YPX-026 Tribunal — a PRIEST REJECTS: its fee `cheque_id` is redeemed WITHOUT the
+     * `bless` flag (paid all the same, no approval). An alias of [`Wallet::redeem_fund`].
+     * @param {any} transport
+     * @param {string} cheque_id
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    rejectFund(transport, cheque_id, params, progress) {
+        const ptr0 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_rejectFund(this.__wbg_ptr, transport, ptr0, len0, params, progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * KI#334 item 1 — the STATE-NEUTRAL inherited-scar sweep (native `heal::sweep_inherited_scars`
+     * parity): THE sweep the send / redeem machines run, on its own — no state moved, nothing
+     * registered, nothing decided or waited for (RULE 5C). Resolves with `{ applied, unsettled
+     * (txid hex[]), retryAfterSecs (null unless an origin is settling), preChainHashHex,
+     * factChainCbor? }`; when `factChainCbor` is present pass it with `preChainHashHex` to
+     * [`Wallet::commit_inherited_sweep`]. `unsettled` non-empty with no wait = held / unvouched —
+     * burn is the exit, waiting does not clear it.
+     * @param {any} transport
+     * @param {string[]} nabla_tcp_addresses
+     * @returns {Promise<any>}
+     */
+    resolveInheritedScarsFund(transport, nabla_tcp_addresses) {
+        const ptr0 = passArrayJsValueToWasm0(nabla_tcp_addresses, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_resolveInheritedScarsFund(this.__wbg_ptr, transport, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Put an application-abandoned SEND or REDEEM round back (`abandoned/<txid>.cbor`, kept
+     * by `abandonRound('send' | 'redeem')`) so `resumeSend` / the redeem retry can collect its late replies — collecting late
+     * replies IS resume. The application's decision; returns the round's kind. Refused,
+     * nothing written, when a different send round is current or the kept round no
+     * longer anchors to the wallet.
+     * @param {string} txid_hex
+     * @returns {string}
+     */
+    restoreRound(txid_hex) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wallet_restoreRound(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * The interrupted-but-resumable send round on this wallet, if one is still
+     * valid (the wallet hasn't moved since the timeout). Returns a plain JS
+     * object `{ to, amount, sigsHave, sigsNeeded, createdAtSecs }` or `null`.
+     * A stale / wrong-format round is cleaned up and reported as `null`. Cheap
+     * local read — safe to poll on pane entry / overview render.
      * @returns {any}
      */
     resumableSend() {
         const ret = wasm.wallet_resumableSend(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * KI#378 — RESUME this cheque's SAVED redeem round (native `resume_redeem` parity):
+     * the SAME declared set, ONE pass over the members not yet signed, the SAVED envelope
+     * with only the carried signatures replaced — no Nabla pre-flight, no claim, no CL5.
+     * APPLICATION-called only (RULE 5C): `redeemFund` on a cheque with a saved round
+     * returns that round's report instead. Same `params` and result as `redeemFund`;
+     * commit with [`Wallet::commit_redeem`]. Refused when no saved round of this cheque
+     * anchors to the wallet's current state.
+     * @param {any} transport
+     * @param {string} cheque_id
+     * @param {any} params
+     * @param {any} progress
+     * @returns {Promise<any>}
+     */
+    resumeRedeem(transport, cheque_id, params, progress) {
+        const ptr0 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_resumeRedeem(this.__wbg_ptr, transport, ptr0, len0, params, progress);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -764,7 +1230,7 @@ export class Wallet {
      * remaining hops with the SAME tx (same txid ⇒ the content-keyed YPX-016
      * witness cache replays a committed validator's response). Resolves with
      * the SAME outcome shape as `sendFund` — pass it to [`Wallet::commit_send`].
-     * Errors with `WalletStateStale` if the wallet moved since the interruption
+     * Errors with `RoundNotResumable` if the wallet moved since the interruption
      * (the round is discarded; nothing from it was committed). `params` is the
      * same shape `sendFund` takes (validators, nablaTcpAddresses, inbox
      * paths, poll settings); the recipient / amount / reference come from the
@@ -780,6 +1246,64 @@ export class Wallet {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Retain a COMPLETED send — call it AFTER `commitSend` (the proof strips the receipt the
+     * commit just stored): the per-txid Send Proof (`send_proofs/{txid}.cbor`, THE sdk-core
+     * writer `send_proof::persist_send_proof`, the native store) — so ANY completed payment
+     * stays recallable (`recallFund({recallTxidHex})`) and its Tribunal terms readable
+     * (`retainedSendTribunal`) — and the most-recent-send slot `recallFund` defaults to.
+     * ~~`stashLastSendTx`: only the LAST send was recallable~~ — after a Tribunal (escrow,
+     * then one fee per PRIEST) that was a fee, never the escrow.
+     * @param {string} txid_hex
+     * @param {Uint8Array} tx_cbor
+     */
+    retainSend(txid_hex, tx_cbor) {
+        const ptr0 = passStringToWasm0(txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(tx_cbor, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_retainSend(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * YPX-026 — the Tribunal terms of a retained send, or `null` (not retained / a plain
+     * payment): `{recallMaturityTick, recallMaturityUnix, maturityTick?, maturityUnix?, p,
+     * priests, escrowTxidHex?}` (`escrowTxidHex` ⇔ a PRIEST fee). Gate a Tribunal payment's
+     * Recall on `recallMaturity*` — the standard recall window never applies to it and it
+     * never closes (YPX-026 §6.1).
+     * @param {string} txid_hex
+     * @returns {any}
+     */
+    retainedSendTribunal(txid_hex) {
+        const ptr0 = passStringToWasm0(txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_retainedSendTribunal(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * The retained send's exact signed Transaction CBOR (`retainSend`), or `undefined`.
+     * @param {string} txid_hex
+     * @returns {Uint8Array | undefined}
+     */
+    retainedSendTxCbor(txid_hex) {
+        const ptr0 = passStringToWasm0(txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_retainedSendTxCbor(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
     }
     /**
      * Persist the wallet to its storage backend. Idempotent.
@@ -821,13 +1345,34 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * YPX-010 §11.9 Rules 1–2 — `undefined` = allowed; else the Core refusal name
+     * (`ArkChargeNotOwner` / `ArkToNonArkRejected`). Judged on wallet_ids + this
+     * wallet's key, never on which app holds the account. For receiver pickers.
+     * @param {string} receiver_wallet_id
+     * @returns {string | undefined}
+     */
+    sendRouteRefusal(receiver_wallet_id) {
+        const ptr0 = passStringToWasm0(receiver_wallet_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_sendRouteRefusal(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getStringFromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
      * Persist and release the lock. The handle becomes unusable afterwards.
      * §5.2.3 — arm a SUBSIDY STAKE CLAIM for the next genesis claim.
      *
      * `tier`: **2 = Foundation**, **3 = Bootstrap**, **0 = an ordinary genesis
      * airdrop** (the default, and what every normal wallet uses).
      *
-     * ⚠ **THE WALLET CLIENT IS A WALLET CLIENT** (Sonny, 2026-09-07). This does
+     * ⚠ **THE WALLET CLIENT IS A WALLET CLIENT** (ruled 2026-09-07). This does
      * NOT make the wallet a validator and touches no validator machinery: there
      * is no certificate request here and none is possible from a browser. It
      * arms the CLAIM only. An operator claims the stake in their wallet, then
@@ -895,23 +1440,6 @@ export class Wallet {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * Stash a send's serde-CBOR transaction (the `sendTxCbor` field
-     * `sendFund` surfaces on resolve) so a completed-but-unclaimed payment
-     * can later be RECALLED (the recall carries the completed send's own
-     * signed tx — Nabla recomputes the txid from it). The browser wallet
-     * has no per-txid Send Proof store, so the most recent send is the
-     * recallable one; persisted in the wallet file.
-     * @param {Uint8Array} tx_cbor
-     */
-    stashLastSendTx(tx_cbor) {
-        const ptr0 = passArray8ToWasm0(tx_cbor, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wallet_stashLastSendTx(this.__wbg_ptr, ptr0, len0);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
      * YPX-021 §8.2: stash the writer's OODS reading a fund outcome surfaced
      * (`oodsAttestationCbor`) — mirror of native nabla.rs caching it from
      * every RegisterAck. The NEXT op carries it; recoveries (heal / HAL /
@@ -933,6 +1461,106 @@ export class Wallet {
      */
     status() {
         const ret = wasm.wallet_status(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * YPX-026 §4 step 4a (ruling R7) — the APPROVAL bundles this wallet received for
+     * the escrow `escrowTxidHex` (mirror of native `Wallet::tribunal_approvals`), as hex of
+     * the CBOR `Vec<ChequeBundle>` — what `redeemFund`'s `tribunalBlessingsHex` takes.
+     * Unverified: Core CL5 verifies each at the redeem.
+     * @param {string} escrow_txid_hex
+     * @returns {string}
+     */
+    tribunalApprovals(escrow_txid_hex) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(escrow_txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wallet_tribunalApprovals(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * YPX-026 §2.4a — warnings (never a refusal) for a Tribunal payment naming these PRIESTs
+     * (parallel arrays: wallet id, 64-hex key): `PriestIsReceiver:<i>` / `PriestIsSender:<i>`.
+     * @param {string} receiver_wallet_id
+     * @param {string[]} priest_wallet_ids
+     * @param {string[]} priest_pks_hex
+     * @returns {string[]}
+     */
+    tribunalPriestWarnings(receiver_wallet_id, priest_wallet_ids, priest_pks_hex) {
+        const ptr0 = passStringToWasm0(receiver_wallet_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayJsValueToWasm0(priest_wallet_ids, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayJsValueToWasm0(priest_pks_hex, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_tribunalPriestWarnings(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v4 = getArrayJsValueFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v4;
+    }
+    /**
+     * YPX-026 Tribunal — Bob's STATUS of the pending payment `chequeId` (mirror of native
+     * `redeem::tribunal_status`, THE sdk-core rule): `{p, priests, approved, waiting,
+     * satisfiable}`. Each received approval is verified by Core's CL4 in-process
+     * (read-only). `satisfiable` ⇒ `redeemFund` now — the approvals ride it automatically.
+     * @param {string} cheque_id
+     * @returns {any}
+     */
+    tribunalStatus(cheque_id) {
+        const ptr0 = passStringToWasm0(cheque_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_tribunalStatus(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * YPX-026 — the PRIEST fees of a Tribunal that were NOT sent (kept by the SDK in the
+     * wallet dir, so the list survives a reload): `[{escrowTxidHex, priest, fee, error}]`.
+     * @returns {any}
+     */
+    tribunalUnsentFees() {
+        const ret = wasm.wallet_tribunalUnsentFees(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * YPX-026 — the fee terms + amount to RE-SEND an unsent PRIEST fee with the standard
+     * `sendFund` (`tribunalHex` = `feeTermsHex`, `tribunalRefHex` = the escrow txid,
+     * `amount` = `fee`), read from the RETAINED escrow (`retainSend`) and the recorded row —
+     * never from app memory. Call `clearUnsentTribunalFee` after the fee's `commitSend`.
+     * @param {string} escrow_txid_hex
+     * @param {string} priest
+     * @returns {any}
+     */
+    unsentTribunalFeeSend(escrow_txid_hex, priest) {
+        const ptr0 = passStringToWasm0(escrow_txid_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(priest, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_unsentTribunalFeeSend(this.__wbg_ptr, ptr0, len0, ptr1, len1);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -998,22 +1626,6 @@ export function axcF(amount) {
 }
 
 /**
- * Build a framed VSP request ready to ship to a validator's VSP
- * endpoint (e.g. via the JS `transport.js` channel). Returns the
- * raw wire bytes (`[u32-BE length | CBOR body]`).
- * @returns {Uint8Array}
- */
-export function buildVspRequest() {
-    const ret = wasm.buildVspRequest();
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v1;
-}
-
-/**
  * The CoreID this build was compiled to expect (`CANONICAL_CORE_ID`).
  * Empty string in a dev build with no baked value.
  * @returns {string}
@@ -1056,23 +1668,32 @@ export function certificatePdfFromProof(proof, expected_core_id, expected_sdid) 
 
 /**
  * Worker entry point: run CL1 through the AVM and return the signed DMAP
- * attestation bytes (empty on Core reject). The hosting page runs this in a
+ * attestation bytes. KI#448 (2026-10-30, review): it returns the WHOLE run as
+ * `Cl1Run::to_cbor` bytes (accepted, proof, Core's rejection_reason) — a refusal reaches the
+ * machine as `IoResult::Cl1Rejected` with no second AVM run. ~~returned empty bytes on a
+ * refusal~~; ~~threw `[CoreRejected] …` so the driver re-ran CL1 in-process on the UI thread~~. The hosting page runs this in a
  * Web Worker that has called `setup(elf)` in its own context, so the heavy
  * AVM execution never blocks the UI thread. Mirrors the in-process
  * `avm::run_cl1` the async driver falls back to.
- * @param {Uint8Array} tx_json
- * @param {Uint8Array} current_state_json
+ *
+ * KI#242: `tx_cbor` / `current_state_cbor` are the CBOR of
+ * `axiom_sdk_core::machine::cl1_worker_inputs_to_cbor` (the page's `txJson` /
+ * `stateJson` argument names predate this; the bytes are opaque to JS).
+ * @param {Uint8Array} tx_cbor
+ * @param {Uint8Array} current_state_cbor
  * @param {Uint8Array | null | undefined} prev_receipts
  * @param {Uint8Array | null | undefined} fact_chain
  * @param {Uint8Array} client_private_key
  * @param {number} now
- * @param {Uint8Array | null} [fact_certificates_cbor]
+ * @param {Uint8Array | null | undefined} fact_certificates_cbor
+ * @param {Uint8Array} nabla_bonds_cbor
+ * @param {Uint8Array} nbc_anchors_cbor
  * @returns {Uint8Array}
  */
-export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, client_private_key, now, fact_certificates_cbor) {
-    const ptr0 = passArray8ToWasm0(tx_json, wasm.__wbindgen_malloc);
+export function cl1Run(tx_cbor, current_state_cbor, prev_receipts, fact_chain, client_private_key, now, fact_certificates_cbor, nabla_bonds_cbor, nbc_anchors_cbor) {
+    const ptr0 = passArray8ToWasm0(tx_cbor, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(current_state_json, wasm.__wbindgen_malloc);
+    const ptr1 = passArray8ToWasm0(current_state_cbor, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
     var ptr2 = isLikeNone(prev_receipts) ? 0 : passArray8ToWasm0(prev_receipts, wasm.__wbindgen_malloc);
     var len2 = WASM_VECTOR_LEN;
@@ -1082,53 +1703,95 @@ export function cl1Run(tx_json, current_state_json, prev_receipts, fact_chain, c
     const len4 = WASM_VECTOR_LEN;
     var ptr5 = isLikeNone(fact_certificates_cbor) ? 0 : passArray8ToWasm0(fact_certificates_cbor, wasm.__wbindgen_malloc);
     var len5 = WASM_VECTOR_LEN;
-    const ret = wasm.cl1Run(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, now, ptr5, len5);
+    const ptr6 = passArray8ToWasm0(nabla_bonds_cbor, wasm.__wbindgen_malloc);
+    const len6 = WASM_VECTOR_LEN;
+    const ptr7 = passArray8ToWasm0(nbc_anchors_cbor, wasm.__wbindgen_malloc);
+    const len7 = WASM_VECTOR_LEN;
+    const ret = wasm.cl1Run(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, now, ptr5, len5, ptr6, len6, ptr7, len7);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
-    var v7 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    var v9 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v7;
+    return v9;
 }
 
 /**
- * Worker entry point for CL5 (see [`cl1_run`]).
+ * Worker entry point for CL5 (see [`cl1_run`]). Returns the WHOLE run —
+ * [`axiom_sdk_core::Cl5Run::to_cbor`] bytes (signed attestation + the
+ * `PublicInputs` the AVM ran + Core's `PublicOutputs`) — because the redeem
+ * machine builds its Nabla leg from the run (Fork Settlement W7e-a); the page
+ * transport decodes it with `Cl5Run::from_cbor` (`transport.rs::run_cl5`).
  * @param {Uint8Array} receiver_pk
  * @param {Uint8Array} cheque_bundle
  * @param {bigint} current_balance
  * @param {bigint} wallet_seq
  * @param {bigint} current_hibernation
  * @param {bigint} current_wall_clock_lock
+ * @param {bigint} current_emission_claimed_epoch
+ * @param {Uint8Array} current_floor_terms
+ * @param {Uint8Array} current_wallet_format
  * @param {Uint8Array} state_id
  * @param {Uint8Array | null | undefined} cheque_claim_proof
  * @param {Uint8Array | null | undefined} txid_attestation
  * @param {Uint8Array} client_private_key
  * @param {number} now
- * @param {Uint8Array | null} [oods_attestation]
+ * @param {Uint8Array | null | undefined} oods_attestation
+ * @param {Uint8Array} prev_receipts
+ * @param {Uint8Array} redeem_declared_witnesses
+ * @param {Uint8Array} txid_attestation_cosigns
+ * @param {Uint8Array} cheque_claim_cosigns
+ * @param {Uint8Array} nabla_bonds
+ * @param {Uint8Array} fact_certificates
+ * @param {Uint8Array} nbc_anchors
+ * @param {Uint8Array} receiver_fact_chain
+ * @param {Uint8Array} redeem_fee_breakdown
  * @returns {Uint8Array}
  */
-export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, current_hibernation, current_wall_clock_lock, state_id, cheque_claim_proof, txid_attestation, client_private_key, now, oods_attestation) {
+export function cl5Run(receiver_pk, cheque_bundle, current_balance, wallet_seq, current_hibernation, current_wall_clock_lock, current_emission_claimed_epoch, current_floor_terms, current_wallet_format, state_id, cheque_claim_proof, txid_attestation, client_private_key, now, oods_attestation, prev_receipts, redeem_declared_witnesses, txid_attestation_cosigns, cheque_claim_cosigns, nabla_bonds, fact_certificates, nbc_anchors, receiver_fact_chain, redeem_fee_breakdown) {
     const ptr0 = passArray8ToWasm0(receiver_pk, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(cheque_bundle, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(state_id, wasm.__wbindgen_malloc);
+    const ptr2 = passArray8ToWasm0(current_floor_terms, wasm.__wbindgen_malloc);
     const len2 = WASM_VECTOR_LEN;
-    var ptr3 = isLikeNone(cheque_claim_proof) ? 0 : passArray8ToWasm0(cheque_claim_proof, wasm.__wbindgen_malloc);
-    var len3 = WASM_VECTOR_LEN;
-    var ptr4 = isLikeNone(txid_attestation) ? 0 : passArray8ToWasm0(txid_attestation, wasm.__wbindgen_malloc);
-    var len4 = WASM_VECTOR_LEN;
-    const ptr5 = passArray8ToWasm0(client_private_key, wasm.__wbindgen_malloc);
-    const len5 = WASM_VECTOR_LEN;
-    var ptr6 = isLikeNone(oods_attestation) ? 0 : passArray8ToWasm0(oods_attestation, wasm.__wbindgen_malloc);
+    const ptr3 = passArray8ToWasm0(current_wallet_format, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArray8ToWasm0(state_id, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    var ptr5 = isLikeNone(cheque_claim_proof) ? 0 : passArray8ToWasm0(cheque_claim_proof, wasm.__wbindgen_malloc);
+    var len5 = WASM_VECTOR_LEN;
+    var ptr6 = isLikeNone(txid_attestation) ? 0 : passArray8ToWasm0(txid_attestation, wasm.__wbindgen_malloc);
     var len6 = WASM_VECTOR_LEN;
-    const ret = wasm.cl5Run(ptr0, len0, ptr1, len1, current_balance, wallet_seq, current_hibernation, current_wall_clock_lock, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, now, ptr6, len6);
+    const ptr7 = passArray8ToWasm0(client_private_key, wasm.__wbindgen_malloc);
+    const len7 = WASM_VECTOR_LEN;
+    var ptr8 = isLikeNone(oods_attestation) ? 0 : passArray8ToWasm0(oods_attestation, wasm.__wbindgen_malloc);
+    var len8 = WASM_VECTOR_LEN;
+    const ptr9 = passArray8ToWasm0(prev_receipts, wasm.__wbindgen_malloc);
+    const len9 = WASM_VECTOR_LEN;
+    const ptr10 = passArray8ToWasm0(redeem_declared_witnesses, wasm.__wbindgen_malloc);
+    const len10 = WASM_VECTOR_LEN;
+    const ptr11 = passArray8ToWasm0(txid_attestation_cosigns, wasm.__wbindgen_malloc);
+    const len11 = WASM_VECTOR_LEN;
+    const ptr12 = passArray8ToWasm0(cheque_claim_cosigns, wasm.__wbindgen_malloc);
+    const len12 = WASM_VECTOR_LEN;
+    const ptr13 = passArray8ToWasm0(nabla_bonds, wasm.__wbindgen_malloc);
+    const len13 = WASM_VECTOR_LEN;
+    const ptr14 = passArray8ToWasm0(fact_certificates, wasm.__wbindgen_malloc);
+    const len14 = WASM_VECTOR_LEN;
+    const ptr15 = passArray8ToWasm0(nbc_anchors, wasm.__wbindgen_malloc);
+    const len15 = WASM_VECTOR_LEN;
+    const ptr16 = passArray8ToWasm0(receiver_fact_chain, wasm.__wbindgen_malloc);
+    const len16 = WASM_VECTOR_LEN;
+    const ptr17 = passArray8ToWasm0(redeem_fee_breakdown, wasm.__wbindgen_malloc);
+    const len17 = WASM_VECTOR_LEN;
+    const ret = wasm.cl5Run(ptr0, len0, ptr1, len1, current_balance, wallet_seq, current_hibernation, current_wall_clock_lock, current_emission_claimed_epoch, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, now, ptr8, len8, ptr9, len9, ptr10, len10, ptr11, len11, ptr12, len12, ptr13, len13, ptr14, len14, ptr15, len15, ptr16, len16, ptr17, len17);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
-    var v8 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    var v19 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v8;
+    return v19;
 }
 
 /**
@@ -1200,7 +1863,7 @@ export function getCoreId() {
  * 乖乖 (椰子口味) — the axiom-denomination canary. Returning the art proves the
  * AXC/atom converter lib is linked into this wasm; if the dep is ever severed
  * this won't compile. The web wallet shows it as an easter egg (7 taps on the
- * build chip). See the kuaikuai consolidation rule in CLAUDE.md.
+ * build chip). See the kuaikuai consolidation rule in the project rules.
  * @returns {string}
  */
 export function kuaikuaiArt() {
@@ -1217,6 +1880,16 @@ export function kuaikuaiArt() {
 }
 
 /**
+ * The dust value — Core's `MINIMUM_TX_ATOMS` (the FFI's `sdk_minimum_tx_atoms`): the least
+ * payment. Read it; never type it.
+ * @returns {bigint}
+ */
+export function minimumTxAtoms() {
+    const ret = wasm.minimumTxAtoms();
+    return BigInt.asUintN(64, ret);
+}
+
+/**
  * "1.5 AXC" → atoms. Throws if the input cannot be parsed.
  * @param {string} s
  * @returns {bigint}
@@ -1229,35 +1902,6 @@ export function parseAxc(s) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return BigInt.asUintN(64, ret[0]);
-}
-
-/**
- * Parse a framed VSP response into JSON. Browser JS then re-parses
- * the JSON; the CBOR→typed→JSON round-trip keeps the FFI surface
- * stable across builds (CBOR field renames don't ripple into the
- * JS bridge).
- * @param {Uint8Array} response_cbor
- * @returns {string}
- */
-export function parseVspResponse(response_cbor) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passArray8ToWasm0(response_cbor, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.parseVspResponse(ptr0, len0);
-        var ptr2 = ret[0];
-        var len2 = ret[1];
-        if (ret[3]) {
-            ptr2 = 0; len2 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred3_0 = ptr2;
-        deferred3_1 = len2;
-        return getStringFromWasm0(ptr2, len2);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
-    }
 }
 
 /**
@@ -1319,7 +1963,7 @@ export function sdkVersion() {
  * success. Errors — refusing to run — if the ELF's CoreID does not equal
  * `CANONICAL_CORE_ID` baked into this build, because the WASM client MUST
  * execute the SAME Core as the network validators or every DMAP proof it
- * produces is rejected (docs/AXIOM_DESIGN_WasmClient.md §2).
+ * produces is rejected (docs/archive/AXIOM_DESIGN_WasmClient.md §2).
  * @param {Uint8Array} elf_bytes
  * @returns {string}
  */
@@ -1345,6 +1989,16 @@ export function setup(elf_bytes) {
 }
 
 /**
+ * One TARDIS tick COUNT in wall-clock seconds (`types::TICK_INTERVAL_SECS`, the FFI's
+ * `sdk_tick_interval_secs`). Never type `5` in the app.
+ * @returns {bigint}
+ */
+export function tickIntervalSecs() {
+    const ret = wasm.tickIntervalSecs();
+    return BigInt.asUintN(64, ret);
+}
+
+/**
  * Atoms → AXC as floating point.
  * @param {bigint} atoms
  * @returns {number}
@@ -1352,6 +2006,59 @@ export function setup(elf_bytes) {
 export function toAxc(atoms) {
     const ret = wasm.toAxc(atoms);
     return ret;
+}
+
+/**
+ * The least Tribunal PRIEST fee — twice the dust value (Core `TRIBUNAL_FEE_MIN_ATOMS`, YPX-026
+ * §2.3 check 11; the FFI's `sdk_tribunal_fee_min_atoms`). Read it; never type it.
+ * @returns {bigint}
+ */
+export function tribunalFeeMinAtoms() {
+    const ret = wasm.tribunalFeeMinAtoms();
+    return BigInt.asUintN(64, ret);
+}
+
+/**
+ * YPX-026 Tribunal — build and CHECK the terms of a conditional payment (THE sdk-core
+ * builder `TribunalTerms`, Core's terms rule; `TribunalInvalid` on a mistake). Maturities are
+ * tick COUNTS (`recallAfterTicks`, `maturityAfterTicks`) + the wall-clock second; the SDK fills
+ * each tick value from the device clock and returns it (`recallMaturityTick` / `Unix`,
+ * `maturityTick` / `Unix`) — no `observedTick` arithmetic in the page. The browser
+ * sequences the payment itself (two-phase sends): `sendFund` the escrow with `tribunalHex
+ * = termsHex` and `commitSend`, then one `sendFund` per listed PRIEST of `fee` atoms with
+ * `tribunalHex = feeTermsHex`, `tribunalRefHex = <escrow txid>` (and `commitSend` each).
+ * @param {any} params
+ * @returns {any}
+ */
+export function tribunalTerms(params) {
+    const ret = wasm.tribunalTerms(params);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * KI#240 — the core/logic tuning profile this wasm was compiled with, as the
+ * greppable marker (`version::TUNING_PROFILE_MARKER`). ⚠ Never spell the
+ * marker literally in a doc comment here: binding generators embed docs in the
+ * artifact, and a literal would plant a marker the code did not compile. Exporting it is
+ * what puts the marker's BYTES into the shipped `.wasm` (an unused `&str` const
+ * emits nothing), so `scripts/build_profile.py verify` can measure the web
+ * wallet against the ELF like every native. Read-only, not protocol surface.
+ * @returns {string}
+ */
+export function tuningProfile() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.tuningProfile();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
 }
 
 /**
@@ -1487,10 +2194,6 @@ function __wbg_get_imports() {
             const ret = arg0.apply(arg1, arg2);
             return ret;
         }, arguments); },
-        __wbg_call_330a13e9abecff0b: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
-            const ret = arg0.call(arg1, arg2, arg3, arg4, arg5);
-            return ret;
-        }, arguments); },
         __wbg_call_a41d6421b30a32c5: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = arg0.call(arg1, arg2);
             return ret;
@@ -1509,6 +2212,10 @@ function __wbg_get_imports() {
         },
         __wbg_done_b1afd6201ac045e0: function(arg0) {
             const ret = arg0.done;
+            return ret;
+        },
+        __wbg_from_ff141b1e4c69b979: function(arg0) {
+            const ret = Array.from(arg0);
             return ret;
         },
         __wbg_getRandomValues_c44a50d8cfdaebeb: function() { return handleError(function (arg0, arg1) {
@@ -1600,10 +2307,6 @@ function __wbg_get_imports() {
             const ret = new Array();
             return ret;
         },
-        __wbg_new_46ae4e4ff2a07a64: function() {
-            const ret = new Map();
-            return ret;
-        },
         __wbg_new_8454eee672b2ba6e: function(arg0) {
             const ret = new Uint8Array(arg0);
             return ret;
@@ -1615,7 +2318,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h55ba5d9b0d931412(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1637,7 +2340,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h55ba5d9b0d931412(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1712,10 +2415,6 @@ function __wbg_get_imports() {
         __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
             arg0[arg1] = arg2;
         },
-        __wbg_set_82f7a370f604db70: function(arg0, arg1, arg2) {
-            const ret = arg0.set(arg1, arg2);
-            return ret;
-        },
         __wbg_set_b0d9dc239ecdb765: function(arg0, arg1, arg2) {
             arg0.set(getArrayU8FromWasm0(arg1, arg2));
         },
@@ -1762,8 +2461,8 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 301, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 634, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hd34e3f1e04897830);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1771,22 +2470,17 @@ function __wbg_get_imports() {
             const ret = arg0;
             return ret;
         },
-        __wbindgen_cast_0000000000000003: function(arg0) {
-            // Cast intrinsic for `I64 -> Externref`.
-            const ret = arg0;
-            return ret;
-        },
-        __wbindgen_cast_0000000000000004: function(arg0, arg1) {
+        __wbindgen_cast_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
             const ret = getArrayU8FromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_cast_0000000000000005: function(arg0, arg1) {
+        __wbindgen_cast_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_cast_0000000000000006: function(arg0) {
+        __wbindgen_cast_0000000000000005: function(arg0) {
             // Cast intrinsic for `U64 -> Externref`.
             const ret = BigInt.asUintN(64, arg0);
             return ret;
@@ -1807,15 +2501,15 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2) {
-    const ret = wasm.wasm_bindgen__convert__closures_____invoke__he5c5569f8eeafad8(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__hd34e3f1e04897830(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen__convert__closures_____invoke__hd34e3f1e04897830(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
 }
 
-function wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h035e0d6aed1996be(arg0, arg1, arg2, arg3);
+function wasm_bindgen__convert__closures_____invoke__h55ba5d9b0d931412(arg0, arg1, arg2, arg3) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h55ba5d9b0d931412(arg0, arg1, arg2, arg3);
 }
 
 const WalletFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -1897,6 +2591,17 @@ function debugString(val) {
     return className;
 }
 
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getDataViewMemory0();
+    const result = [];
+    for (let i = ptr; i < ptr + 4 * len; i += 4) {
+        result.push(wasm.__wbindgen_externrefs.get(mem.getUint32(i, true)));
+    }
+    wasm.__externref_drop_slice(ptr, len);
+    return result;
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -1967,6 +2672,16 @@ function passArray8ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 1, 1) >>> 0;
     getUint8ArrayMemory0().set(arg, ptr / 1);
     WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayJsValueToWasm0(array, malloc) {
+    const ptr = malloc(array.length * 4, 4) >>> 0;
+    for (let i = 0; i < array.length; i++) {
+        const add = addToExternrefTable0(array[i]);
+        getDataViewMemory0().setUint32(ptr + 4 * i, add, true);
+    }
+    WASM_VECTOR_LEN = array.length;
     return ptr;
 }
 

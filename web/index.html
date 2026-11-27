@@ -32,14 +32,14 @@
   button:disabled { opacity:.5; cursor:not-allowed; }
   /* In-flight lock — grey out concurrent-op triggers while a protocol op runs
      (navigation, copy, lock/forget, read-only refresh stay usable). */
-  #main.busy #ov-claim, #main.busy #s-send, #main.busy #ov-heal,
+  #main.busy #ov-claim, #main.busy #s-send, #main.busy #ov-heal, #main.busy #ov-anchor, #main.busy #r-anchor,
   #main.busy #r-refresh, #main.busy #r-register, #main.busy #r-test,
   #main.busy #r-cheques button {
     opacity:.45; pointer-events:none; filter:grayscale(.4);
   }
   /* Core-divergence lock — disable every value-moving op while this build's
      Core differs from the live worldline Core (Same-Core invariant). */
-  #main.corelock #ov-claim, #main.corelock #s-send, #main.corelock #ov-heal,
+  #main.corelock #ov-claim, #main.corelock #s-send, #main.corelock #ov-heal, #main.corelock #ov-anchor, #main.corelock #r-anchor,
   #main.corelock #r-cheques button {
     opacity:.45; pointer-events:none; filter:grayscale(.4);
   }
@@ -50,6 +50,9 @@
   #main.hibernating #ov-hal-reanchor, #main.hibernating #r-cheques button {
     opacity:.45; pointer-events:none; filter:grayscale(.4);
   }
+  /* KI#216 — the post-creation "Anchor this wallet" offer (an offer, never forced). */
+  .anchor-offer { border-color:var(--acc); }
+  .anchor-offer.fresh { box-shadow:0 0 0 2px rgba(120,170,255,.25); }
   .hib-banner { margin-top:.9rem; padding:.7rem .8rem; border:1px solid #5a4; border-radius:10px;
     background:rgba(90,160,90,.10); }
   .hib-banner > b { color:#9d6; }
@@ -237,7 +240,7 @@
       <button id="u-forget" class="ghost">Forget</button>
     </div>
     <div style="margin-top:.6rem"><button id="u-new" class="ghost" style="width:100%">＋ Create a different wallet</button></div>
-    <!-- ⚠ IMPORT LIVES ON THE LOGIN SCREEN BY DESIGN (Sonny, 2026-09-07):
+    <!-- ⚠ IMPORT LIVES ON THE LOGIN SCREEN BY DESIGN (ruled 2026-09-07):
          "the webclient shouldnt be support two wallets at the same time ... to
          working on a validator wallet, it is required to logout first that make
          total sense". One wallet open at a time, so SWITCHING wallets — including
@@ -266,6 +269,9 @@
         <div><span>Scars</span><b id="ov-scar">—</b></div>
         <div><span>Wallet seq</span><b id="ov-seq">—</b></div>
         <div><span>Pending cheques</span><b id="ov-pending">—</b></div>
+        <!-- KI#216 — anchored = the wallet has its own key-bound first state (any
+             history: a claim, a redeem, a send or an initial anchor). -->
+        <div><span>Anchored</span><b id="ov-anchored">—</b></div>
       </div>
       <details style="margin-top:.9rem"><summary>State id</summary>
         <div class="addr" id="ov-state" style="margin-top:.4rem"></div></details>
@@ -295,6 +301,28 @@
 
     <!-- Overview tab -->
     <div id="tab-overview">
+      <!-- KI#216 INITIAL-ANCHOR (docs/AXIOM_DESIGN_FirstAnchor.md; ruling
+           2026-10-11): OFFERED right after creation, never forced — the user anchors
+           or skips. Shown while the wallet has no history; "Skip for now" hides it
+           for good (per wallet) — the reminder is then the Receive-view prompt and a
+           note when an address is copied (ruling 2026-10-11). The page only relays: the WASM SDK
+           (initialAnchorFund) builds, witnesses and registers the anchor over TOT. -->
+      <div class="card anchor-offer" id="ov-anchor-card" style="display:none">
+        <h2>Anchor this wallet <span class="badge">recommended</span></h2>
+        <p class="muted" style="margin:.1rem 0 .5rem">Protects cheques sent to this address
+          before first use. Anchoring gives the wallet its own first state, bound to your key,
+          so a cheque intercepted on its way to this address cannot be redeemed by anyone
+          else. <b>Do it before you share your address.</b> No fee, moves no value; takes one
+          witness round.</p>
+        <p class="muted" id="ov-anchor-claim-note" style="margin:0 0 .7rem">If you plan to
+          <b>claim your 1 AXC</b>, claim instead: the claim also anchors the wallet, and an
+          anchored wallet can no longer make its one-time claim.</p>
+        <div class="row">
+          <button id="ov-anchor">Anchor now</button>
+          <button id="ov-anchor-skip" class="ghost">Skip for now</button>
+        </div>
+        <pre id="anchor-out" class="muted" style="margin:.7rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+      </div>
       <div class="card">
         <h2>Other tier addresses</h2>
         <div id="ov-tiers"></div>
@@ -351,7 +379,34 @@
         <input id="s-amt" type="number" min="0" step="any" placeholder="0.0" />
         <label>Carrier</label>
         <select id="s-carrier"><option value="tot">TOT (browser · required)</option></select>
+        <!-- YPX-026 Tribunal — a CONDITIONAL payment (YP-SDK §4.5c / §4.5c-1). The SDK checks the
+             terms (TribunalInvalid sends nothing); Core enforces them at every redeem. -->
+        <label style="display:flex; gap:.45rem; align-items:center; margin-top:.7rem">
+          <input type="checkbox" id="s-trib" style="width:auto; margin:0" /> Conditional payment (Tribunal)</label>
+        <div id="s-trib-box" style="display:none; margin-top:.3rem">
+          <p class="muted" style="margin:.2rem 0 .5rem">The receiver can redeem only once <b>p</b> of the
+            PRIESTs you name approve. Each PRIEST is paid their own fee whether they approve or reject.
+            If the receiver has not redeemed by the recall time, you can recall the payment.</p>
+          <label>Recall possible after (hours)</label>
+          <input id="s-trib-recall-h" type="number" min="1" step="any" value="72" />
+          <label>Receiver may redeem only after (hours, optional)</label>
+          <input id="s-trib-mat-h" type="number" min="0" step="any" placeholder="no waiting time" />
+          <label>PRIESTs — one per line: wallet address, public key (64 hex), fee in AXC</label>
+          <textarea id="s-trib-priests" rows="3" style="width:100%; font:12px ui-monospace,monospace"
+            placeholder="carol@axiom/1a2b…  9f3c…(64 hex)  0.5"></textarea>
+          <div class="muted" id="s-trib-dust" style="font-size:11px"></div>
+          <label>Approvals needed (p)</label>
+          <input id="s-trib-p" type="number" min="1" step="1" value="1" />
+        </div>
         <div style="margin-top:1rem"><button id="s-send" style="width:100%">Send</button></div>
+        <!-- YPX-026 — the conditional payments this wallet sent: each escrow's Recall (from its
+             recall time — a Tribunal payment never uses the standard recall window) and any
+             PRIEST fee that was not sent (the SDK keeps the list across reloads). -->
+        <div id="s-trib-sent" style="display:none; margin-top:.8rem">
+          <b style="font-size:13px">Conditional payments</b>
+          <div id="s-trib-sent-list" style="margin-top:.35rem"></div>
+          <pre id="s-trib-sent-out" class="muted" style="margin:.5rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
+        </div>
         <!-- YPX-022 RECALL (repurposed 2026-07-07): retract a COMPLETED but
              UNDELIVERED payment — the most recent send from this browser,
              once it has gone unclaimed past the protected window. Shown
@@ -423,6 +478,18 @@
           To <b>decline</b>, do nothing.
         </p>
         <div id="r-consent-list"></div>
+      </div>
+
+      <!-- KI#216 reminder (ruling 2026-10-11): while the wallet is unanchored, the
+           Receive view carries a small inline prompt — the moment the user is about to
+           share the address. Not on every unlock. -->
+      <div class="card anchor-offer" id="r-anchor-prompt" style="display:none">
+        <div class="row" style="align-items:center">
+          <span class="muted" style="flex:3">This wallet is <b>not anchored</b> yet — anchor it
+            before you share your address, so a cheque sent to it cannot be taken on the way.</span>
+          <button id="r-anchor" style="flex:1">Anchor now</button>
+        </div>
+        <pre id="r-anchor-out" class="muted" style="margin:.5rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
       </div>
 
       <!-- Pull first — the primary receive action. -->
@@ -528,11 +595,11 @@
         <div id="v-choices">
           <div style="margin-bottom:.6rem">
             <b>Bootstrap</b> — claims <b>505 AXC</b>
-            <div class="muted">Community tier. Stake floor 500 AXC; the extra 5 covers fees.</div>
+            <div class="muted">Community. Stake floor 500 AXC; the extra 5 covers fees.</div>
           </div>
           <div style="margin-bottom:.6rem">
-            <b>Foundation</b> — claims <b>505,000 AXC</b>
-            <div class="muted">Foundation tier. Stake floor 500,000 AXC; the extra 5,000 covers fees.</div>
+            <b>Foundation</b> — claims <b>6,060 AXC</b>
+            <div class="muted">Foundation seat. Same stake floor as everyone, 500 AXC; the claim lands at least 6,000 AXC after fees.</div>
           </div>
         </div>
 
@@ -592,11 +659,11 @@
           and either stamps the certificate or refuses. Each certificate can be
           registered <b>once</b>.
         </p>
-        <input id="v-vbc" type="file" accept=".json,application/json" style="width:100%">
+        <input id="v-vbc" type="file" accept=".cbor,application/cbor" style="width:100%">
         <button id="v-register" class="ghost" style="width:100%; margin-top:.5rem">Register with Nabla</button>
         <p class="muted" style="margin:.6rem 0 0">
-          Choose the validator's <code>config/vbc.json</code>. On success the <b>stamped</b>
-          file downloads — copy it back over <code>config/vbc.json</code> on the validator.
+          Choose the validator's <code>config/vbc-bundle.cbor</code>. On success the <b>stamped</b>
+          file downloads — copy it back over <code>config/vbc-bundle.cbor</code> on the validator.
         </p>
         <pre id="v-reg-out" class="muted" style="margin:.6rem 0 0; white-space:pre-wrap; font:11px ui-monospace,monospace"></pre>
       </div>
@@ -651,8 +718,8 @@ const _init = _mod.default;
 const { fatmamaRegister, kiddoReceiveCycle, stripEmailToCbor } = await import('./kiddo.js?v=' + V);
 const { makeSessionPool } = await import('./session.js?v=' + V);
 // Genesis dev-funds claim + redeem (fund/commit splits) and the TOT transport.
-const { claimGenesis, redeem, send, sendWithScarPasscode, heal, burnScars, halReanchor, halComplete, recall, recallComplete, resumeSend } = await import('./genesis.js?v=' + V);
-const { makeTotTransport, totConfigFrom } = await import('./transport.js?v=' + V);
+const { claimGenesis, redeem, send, sendWithScarPasscode, heal, burnScars, halReanchor, halComplete, recall, recallComplete, resumeSend, initialAnchor, sendTribunal, sendUnsentTribunalFee } = await import('./genesis.js?v=' + V);
+const { makeTotTransport, totConfigFrom, totWsUrl } = await import('./transport.js?v=' + V);
 // App-layer at-rest encryption for the wallet keystore (app concern, not SDK).
 const { VAULT } = await import('./vault.js?v=' + V);
 
@@ -698,9 +765,11 @@ function tab(name) {
     // Dev mail connection card only applies to @axiom.internal dev wallets.
     const isDev = String(wallet.info().email || '').endsWith('@axiom.internal');
     $('r-devmail-card').style.display = isDev ? '' : 'none';
+    renderAnchorStatus();   // KI#216 — the Receive-view anchor reminder
   }
   if (name==='history' && wallet) renderHistory();
   if (name==='validator' && wallet) renderValidatorTab();
+  if (name==='send' && wallet) renderTribunalSent();   // YPX-026 — conditional payments sent
 }
 // Self-send recovery types carry no counterparty value (heal + the two
 // YPX-020 HAL kinds). Friendly labels for the raw TxType debug strings.
@@ -765,6 +834,18 @@ function stepProgress(phase, k = 3) {
 const errOf = e => e && e.code ? `${e.code}: ${e.message}` : (e && e.message ? e.message : String(e));
 // Persistent, visible message banner — errors do NOT vanish like the toast.
 const setMsg = (text, cls='err') => { const m=$('msg'); m.textContent=text; m.className=`card ${cls}`; m.style.display=text?'block':'none'; if (text) console[cls==='err'?'error':'log']('[axiom]', text); };
+// Fork Settlement W7e-a — plain message for a redeem outcome whose Nabla
+// registration was refused (RedeemOutcome.redeemLegRefusal); '' otherwise.
+const legRefusalNote = r => (r && r.redeemLegRefusal)
+  ? 'The redeem completed, but its Nabla registration was refused because the redeem leg did not '
+    + "reproduce the validators' commitment. (" + r.redeemLegRefusal + ')'
+  : '';
+// Fork Settlement W7e — plain line for a redeem whose register ack reported the
+// new state HELD (it traces back to a double-spend). Text only: the burn is the
+// user's choice, never automatic.
+const heldNote = r => (r && r.provenance === 'held')
+  ? (r.heldReason || 'This payment traces back to a double-spend and is held. Burn the held amount to release your wallet.')
+  : '';
 
 // Re-auth gate. Prompts (masked) for the wallet key and verifies it before a
 // value-moving op. The key is NEVER stored — verified here and discarded — so
@@ -810,6 +891,46 @@ addEventListener('error', e => setMsg('JS error: ' + (e.message || e.error || e)
 addEventListener('unhandledrejection', e => setMsg('Unhandled: ' + errOf(e.reason), 'err'));
 
 let wallet = null;
+// ── KI#216 INITIAL-ANCHOR — offer after creation (ruling 2026-10-11) ──
+// An OFFER, never forced (protocol provides the tool; the user decides — design §3).
+// "Skip for now" hides the Overview card for this wallet (remembered per wallet in
+// localStorage); the REMINDER (ruling 2026-10-11) is NOT every unlock but the
+// moment the address is about to be shared: an inline prompt on the Receive view and a
+// note when an address is copied — both only while the wallet is unanchored.
+let anchorOffer = { fresh: false };
+const ANCHOR_SKIP_KEY = a => `axiom_anchor_skipped.${a}`;
+function anchorSkipped() {
+  try { const a = wallet?.info().address; return !!(a && localStorage.getItem(ANCHOR_SKIP_KEY(a))); }
+  catch (_) { return false; }
+}
+function setAnchorSkipped() {
+  try { const a = wallet?.info().address; if (a) localStorage.setItem(ANCHOR_SKIP_KEY(a), '1'); } catch (_) {}
+}
+// Unanchored AND an anchor is on offer for this wallet (not a validator wallet).
+function anchorOnOffer() {
+  let anchored = false;
+  try { anchored = !!wallet.isAnchored; } catch (_) {}
+  return !anchored && !isValidatorWalletName(wallet.info().name);
+}
+// Validator-setup wallets (`<Validator>_Stake` / `_Operational`, derived names) are
+// NOT offered: their first transaction is the validator's stake claim, which Core
+// admits only as a wallet's first transaction — an anchor would forfeit it.
+const isValidatorWalletName = n => /_(Stake|Operational)$/.test(String(n || ''));
+function anchoredByOffer() {
+  try { return (wallet.history(0) || []).some(r => r.reference === 'initial-anchor'); }
+  catch (_) { return false; }
+}
+function renderAnchorStatus() {
+  let anchored = false;
+  try { anchored = !!wallet.isAnchored; } catch (_) {}
+  $('ov-anchored').textContent = anchored ? 'Yes' : 'Not yet';
+  const onOffer = anchorOnOffer();
+  const offer = onOffer && !anchorSkipped();
+  const card = $('ov-anchor-card');
+  card.style.display = offer ? '' : 'none';
+  card.classList.toggle('fresh', offer && anchorOffer.fresh);
+  $('r-anchor-prompt').style.display = onOffer ? '' : 'none';   // Receive-view reminder
+}
 // YPX-001 §1.5.1 — incoming payments paused pending THIS wallet's consent.
 // recvScarConsents() consumes each notification from the maildir exactly once
 // (like recv() does for cheques), so accumulate them for the session.
@@ -988,13 +1109,41 @@ async function initClWorker(elf) {
     clWorker = w;
     await clCall('init', clInitPayload(elf));
     // Signatures mirror sdk/wasm/src/transport.rs run_cl1 / run_cl5.
-    CL1 = (txJson, stateJson, prevReceipts, factChain, privateKey, now) =>
-      clCall('cl1', { txJson, stateJson, prevReceipts, factChain, privateKey, now });
-    // current_hibernation + oodsAttestation arrive LAST positionally
-    // (transport.rs pushes them as trailing args); the worker re-inserts
-    // hibernation into cl5Run's slot 5 and appends the reading last.
-    CL5 = (receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now, currentHibernation, oodsAttestation) =>
-      clCall('cl5', { receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now, currentHibernation, oodsAttestation });
+    // 7 declared params (transport.rs refuses to offload to fewer):
+    // factCertificates = CBOR Vec<VBCProofBundle>, the same input the
+    // in-process CL1 run gets — cl1Run's 7th argument.
+    // YP §26.17.6.6 E2 (2026-10-21): the 8th, last, is the request's bond table, CBOR
+    // Vec<NablaBondProof> — REQUIRED.
+    // YP §26.17.6.6 E7 (KI#386, 2026-10-23): the 9th, last, is the wallet's held NBC anchors,
+    // CBOR Vec<NbcAnchor> — REQUIRED.
+    CL1 = (txJson, stateJson, prevReceipts, factChain, privateKey, now, factCertificates, nablaBonds, nbcAnchors) =>
+      clCall('cl1', { txJson, stateJson, prevReceipts, factChain, privateKey, now, factCertificates, nablaBonds, nbcAnchors });
+    // 19 declared params — transport.rs refuses to offload to a closure with
+    // fewer (Function.length); the 17th (DWS 2026-10-08) is the redeem round's
+    // declared set, CBOR Vec<[u8;32]>; the 18th (R1 + H-1 2026-10-10) the redeem's
+    // further txid attestations, CBOR Vec<NablaTxidAttestation>; the 19th (H-1,
+    // KI#306) its further cheque-claim proofs, CBOR Vec<ChequeClaimProof>. Then ValidatorJoin §6b.13 (stake floor as BigInt,
+    // wallet-format block as CBOR bytes) and, last, prevReceipts (review
+    // 2026-10-01 F-1(b): the receiver's last receipt, CBOR Vec<Receipt>). The worker re-orders them into cl5Run's
+    // signature and replies with the WHOLE run (Cl5Run CBOR), which the
+    // redeem machine builds its Nabla leg from (Fork Settlement W7e-a). u64
+    // wallet-state fields arrive as BigInt.
+    // YP §40.4c / YPX-002 §9.1.1d (2026-10-18): slot 14 is the four floor terms as
+    // CBOR bytes (was the stake floor as a BigInt); the 20th, last, is the signers'
+    // bond proofs, CBOR Vec<NablaBondProof>. YP §26.17.6.6 E3 (2026-10-21): the 21st, last, is
+    // the envelope's offered certificates, CBOR Vec<VBCProofBundle>. YP §26.17.6.6 E7 (KI#386,
+    // 2026-10-23): the 22nd is the NBC anchor supply, CBOR Vec<NbcAnchor>. KI#393 (2026-10-24):
+    // the 23rd is the envelope's receiver chain, CBOR Option<FactChain>. KI#545 (2026-11-24): the 24th,
+    // last, is the declared fee list, CBOR Vec<FeeShare>.
+    CL5 = (receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now,
+           currentHibernation, oodsAttestation, currentWallClockLock, currentEmissionClaimedEpoch,
+           currentFloorTerms, currentWalletFormat, prevReceipts, redeemDeclaredWitnesses, txidAttestationCosigns,
+           chequeClaimCosigns, nablaBonds, factCertificates, nbcAnchors, receiverFactChain, redeemFeeBreakdown) =>
+      clCall('cl5', { receiverPk, chequeBundle, balance, walletSeq, stateId, chequeClaimProof, txidAttestation, privateKey, now,
+                      currentHibernation, oodsAttestation, currentWallClockLock, currentEmissionClaimedEpoch,
+                      currentFloorTerms, currentWalletFormat, prevReceipts, redeemDeclaredWitnesses,
+                      txidAttestationCosigns, chequeClaimCosigns, nablaBonds, factCertificates, nbcAnchors,
+                      receiverFactChain, redeemFeeBreakdown });
     console.log('[axiom] CL worker ready — signing runs off the UI thread');
   } catch (e) {
     console.warn('[axiom] CL worker unavailable — signing in-process, UI may pause:', e?.message || e);
@@ -1112,7 +1261,7 @@ async function handOffToValidator(role, name, email, w) {
   const q = new URLSearchParams(location.search);
   const vname = (q.get('validator') || '').trim();
   if (vname && q.get('setup') === '1') {
-    // Operator-facing, not developer-facing (Sonny, 2026-09-09): say WHICH
+    // Operator-facing, not developer-facing (ruled 2026-09-09): say WHICH
     // validator's certificate is being produced and what to do now.
     const b = $('o-setup-banner');
     $('o-title').textContent = `Set up validator ${vname}`;
@@ -1124,16 +1273,16 @@ async function handOffToValidator(role, name, email, w) {
     // Step 4: the two-wallet form replaces the single-wallet form. Both
     // addresses come pre-filled from validator.toml (`stake_email`, and
     // `email` for the operational wallet) — editable; the same address for
-    // both is fine (Sonny, 2026-09-09: ids are address ‖ key-suffix).
+    // both is fine (ruled 2026-09-09: ids are address ‖ key-suffix).
     $('vs-stake-name').textContent = `${vname}_Stake`;
     $('vs-op-name').textContent = `${vname}_Operational`;
-    // Addresses supplied by validator.toml are SHOWN, not asked again (Sonny,
-    // 2026-09-09: "should be just asking for password"). The input keeps the
+    // Addresses supplied by validator.toml are SHOWN, not asked again (ruled
+    // 2026-09-09: only the password is asked for). The input keeps the
     // value so the create handler reads it unchanged.
     const opHint = (q.get('email') || '').trim().toLowerCase();
     const stakeHint = (q.get('stake_email') || opHint).trim().toLowerCase();
     const validatorHint = (q.get('validator_email') || '').trim().toLowerCase();
-    // Each address, highlighted, with its purpose (Sonny, 2026-09-09).
+    // Each address, highlighted, with its purpose (ruled 2026-09-09).
     $('vs-validator-email').textContent = validatorHint || '(not supplied)';
     const vid = (q.get('validator_id') || '').trim().toLowerCase();
     $('vs-validator-id').textContent = vid ? vid.slice(0, 16) + '…' : '(assigned by the validator)';
@@ -1190,6 +1339,7 @@ function renderOverview() {
   $('ov-seq').textContent = st.walletSeq;
   $('ov-pending').textContent = st.pendingCheques;
   $('ov-state').textContent = st.stateId;
+  renderAnchorStatus();
   // Other tiers — Standard (main) + Ark (special) get their own cards above.
   $('ov-tiers').innerHTML = info.addresses
     .filter(([t]) => t !== 'Standard' && t !== 'Ark')
@@ -1198,7 +1348,10 @@ function renderOverview() {
   // claim is a once-per-wallet bootstrap (seq>0 means it already ran; a
   // credited balance means it completed).
   const funded = Number(st.walletSeq) > 0 && BigInt(info.balance) > 0n;
-  $('ov-claim-card').style.display = funded ? 'none' : '';
+  // KI#216 — Core admits the one-time claim only as a wallet's FIRST transaction
+  // (GenesisClaimInvalidSeq otherwise), so a wallet that made an initial anchor can
+  // no longer claim: hide the card rather than offer a round Core must refuse.
+  $('ov-claim-card').style.display = (funded || anchoredByOffer()) ? 'none' : '';
   // Show the recovery card when diagnose() flags heal/burn actions.
   try {
     const actions = wallet.diagnose() || [];
@@ -1212,7 +1365,7 @@ function renderOverview() {
   // YPX-022 (repurposed): the recall affordance targets the last COMPLETED
   // send stashed in the wallet file — persists across sessions, so surface
   // it on every overview render, not just right after a send.
-  try { if (wallet.hasRecallableSend) $('s-recall-box').style.display = ''; } catch (_) {}
+  showGenericRecall();
   // Resumable interrupted send (2026-07-08): surface Resume/Discard while a
   // timed-out round is still valid (the wallet hasn't moved since).
   refreshInterruptedSendBox();
@@ -1255,9 +1408,9 @@ function renderOverview() {
 const DEV_DOMAIN = 'axiom.internal';
 const DEV_PASSCODE = 'fatmama approve axiom';
 
-// The dev class is OPT-IN (Sonny, 2026-09-07: "for dev mail, now it should be
-// in an option you have to click in, guard by the dev password ... because all
-// our validator now has proper access to smtp etc"). Real email is the default
+// The dev class is OPT-IN (ruled 2026-09-07: dev mail is an option you have
+// to click into, guarded by the dev password, because every validator now has
+// proper SMTP access). Real email is the default
 // because it is the only class that works against a production validator: the
 // dev receive path is TOT→FATMAMA, and `dev-fatmama` is compiled OUT of release
 // TOT builds.
@@ -1312,6 +1465,7 @@ $('o-create').onclick = async () => {
     wallet = await createWalletLocal(name, email, key);
     setMsg('');
     toast('wallet created');
+    anchorOffer = { fresh: true };   // KI#216 — offer the anchor now
     renderOverview();
     console.log('[axiom] overview rendered');
   } catch (e) {
@@ -1335,7 +1489,7 @@ async function createWalletLocal(name, email, key) {
 
 
 // §5.5 step 4 — validator setup mode: both wallets, derived names, two
-// addresses, two passphrases (Sonny, 2026-09-08). Sequential under the vault:
+// addresses, two passphrases (ruled 2026-09-08). Sequential under the vault:
 // each wallet's frames are sealed under its OWN key, so create → close → lock
 // between the two. Ends on the unlock screen with both wallets listed; the
 // hand-off (step 7) is the next build.
@@ -1350,7 +1504,7 @@ $('vs-create').onclick = async () => {
     if (!REAL_EMAIL_RE.test(em)) { setMsg(`Enter a valid ${what} wallet email (you@example.com).`, 'err'); $(id).focus(); return; }
     if (em.endsWith(`@${DEV_DOMAIN}`)) { setMsg(`@${DEV_DOMAIN} is the developer class — not for a validator's wallets.`, 'err'); $(id).focus(); return; }
   }
-  // Same address for both is FINE (Sonny, 2026-09-09): a wallet id is
+  // Same address for both is FINE (ruled 2026-09-09): a wallet id is
   // email ‖ key-derived suffix, and every receiver filters on the FULL id —
   // two wallets in one mailbox never mix. (A refusal lived here until then.)
   if (!sk) { setMsg('Enter the stake wallet key.', 'err'); $('vs-stake-key').focus(); return; }
@@ -1380,7 +1534,7 @@ $('vs-create').onclick = async () => {
     const handed = h1 && h2
       ? ` Handed to the validator. Step 2 — the certificate for ${vname} is being produced by the validator; it arrives by email at ${stakeEmail}.`
       : ` Next: hand them to the validator — export each wallet file from its Validator tab (this page was not opened by validator-setup).`;
-    // Wallet IDS (address ‖ key-suffix), not bare addresses (Sonny, 2026-09-09).
+    // Wallet IDS (address ‖ key-suffix), not bare addresses (ruled 2026-09-09).
     setMsg(`Wallets created: ${stakeName} (${id1}) and ${opName} (${id2}).` + handed, 'ok');
     toast('both wallets created');
   } catch (e) {
@@ -1571,10 +1725,147 @@ $('ov-forget').onclick = async () => {
 $('main').addEventListener('click', e => {
   const b = e.target.closest('.copy'); if (!b) return;
   const text = b.dataset.copy ?? ($(b.dataset.copyTarget)?.textContent ?? '');
-  if (text && text !== '(none)') { navigator.clipboard?.writeText(text); toast('copied'); }
+  if (text && text !== '(none)') {
+    navigator.clipboard?.writeText(text); toast('copied');
+    // KI#216 reminder — copying an address is the moment it gets shared.
+    const isAddress = ['ov-addr', 'ov-ark'].includes(b.dataset.copyTarget) || !!b.closest('#ov-tiers');
+    if (isAddress && wallet && anchorOnOffer()) {
+      setMsg('Copied — this wallet is not anchored yet. Anchor it before you share this address (Receive → Anchor now).', 'warn');
+    }
+  }
 });
 // Tab navigation.
 document.querySelectorAll('.nav .tab').forEach(b => b.onclick = () => { setMsg(''); tab(b.dataset.tab); });
+
+// The generic "Recall a payment" box recalls the MOST RECENT send. After a Tribunal that is a
+// PRIEST fee, never the escrow — so the box is hidden when the last send is a Tribunal leg (the
+// "Conditional payments" list recalls each escrow by its txid). review of KI#477 (F5).
+function showGenericRecall() {
+  try {
+    if (!wallet || !wallet.hasRecallableSend) { $('s-recall-box').style.display = 'none'; return; }
+    const last = (wallet.history(50) || []).find(r => r.txType === 'Send');
+    const leg = last ? wallet.retainedSendTribunal(last.txid) : null;
+    $('s-recall-box').style.display = leg ? 'none' : '';
+  } catch (_) {}
+}
+
+// ── YPX-026 Tribunal — conditional payments (YP-SDK §4.5c / §4.5c-1) ──────────────────
+// The page is an INTERFACE to the SDK (RULE 5C): the SDK checks the terms, Core enforces them
+// at every redeem; the page only collects the form, shows the SDK's answers and offers the
+// next step the behaviour table names. Ark wallets take no Tribunal role (the SDK refuses).
+$('s-trib').onchange = () => {
+  $('s-trib-box').style.display = $('s-trib').checked ? '' : 'none';
+  try { $('s-trib-dust').textContent = 'Each fee must be at least '
+    + formatAxc(BigInt(_mod.tribunalFeeMinAtoms())) + ' (twice the network\'s dust value, so the PRIEST can still spend it after the validators\' cut) — every PRIEST\'s fee is required.'; } catch (_) {}
+};
+
+// The form → `tribunalTerms` params: tick COUNTS (hours ÷ the SDK's tick interval) + the
+// wall-clock second; the SDK fills the tick value from the device clock (ruled 2026-11-05 —
+// the page never computes a tick value, and a send never waits for a Nabla reading).
+function tribunalParamsFromForm() {
+  const iv = Number(_mod.tickIntervalSecs());
+  const now = Math.floor(Date.now() / 1000);
+  const at = h => ({ ticks: Math.ceil(h * 3600 / iv), unix: now + Math.ceil(h * 3600) });
+  const rh = parseFloat($('s-trib-recall-h').value);
+  if (!(rh > 0)) throw new Error('Enter the recall time in hours (greater than 0).');
+  const recall = at(rh);
+  const mh = $('s-trib-mat-h').value.trim();
+  const mat = mh ? at(parseFloat(mh)) : null;
+  if (mh && !(parseFloat(mh) >= 0)) throw new Error('The waiting time must be a number of hours (or empty).');
+  const priests = $('s-trib-priests').value.split('\n').map(l => l.trim()).filter(Boolean).map((l, i) => {
+    const [walletId, pkHex, feeAxc] = l.split(/[\s,]+/);
+    const fee = parseFloat(feeAxc);
+    if (!walletId || !pkHex || !(fee > 0))
+      throw new Error(`PRIEST line ${i + 1}: give the wallet address, its public key (64 hex) and the fee in AXC.`);
+    return { walletId, pkHex, fee: Math.round(fee * Number(atomsPerAxc())) };
+  });
+  const p = parseInt($('s-trib-p').value || '0', 10);
+  return { recallAfterTicks: recall.ticks, recallUnixSecs: recall.unix,
+           maturityAfterTicks: mat ? mat.ticks : undefined, maturityUnixSecs: mat ? mat.unix : undefined,
+           priests, p: priests.length ? p : 0 };
+}
+
+// Plain text for the Tribunal answers (Guide §6 / §9.5; YP-SDK §4.5c-1) — else the SDK's own.
+function tribunalErr(e) {
+  const code = e && e.code, m = String(e && e.message || e || '');
+  if (code === 'TribunalInvalid') return 'The terms were refused, nothing was sent: ' + m;
+  if (code === 'TribunalNotMature') return 'Too early — the recall time of this payment has not passed yet. Nothing changed.';
+  if (code === 'ChequeNotReady') return 'Not ready yet — ' + m + ' Nothing changed; try again later.';
+  if (code === 'RecallRefusedClaimed') return 'The receiver has already claimed this payment, so it cannot be recalled.';
+  if (code === 'ChequeAlreadyRedeemed' && /already been recalled|retract is committed/.test(m))
+    return 'This payment was already recalled — finish the recall from the Overview if its cheque is still waiting.';
+  if (code === 'ChequeAlreadyRedeemed')
+    return 'The receiver has already redeemed this payment — it was delivered, so there is nothing to recall.';
+  return errOf(e);
+}
+
+// The conditional payments this wallet sent: each escrow (retained send whose Tribunal terms
+// name no escrow ref) with its Recall from the recall time, and the SDK's unsent PRIEST fees.
+function renderTribunalSent() {
+  const box = $('s-trib-sent'), list = $('s-trib-sent-list');
+  if (!box || !wallet) return;
+  let unsent = [];
+  try { unsent = wallet.tribunalUnsentFees() || []; } catch (_) {}
+  let sends = [];
+  try { sends = (wallet.history(200) || []).filter(r => r.txType === 'Send'); } catch (_) {}
+  const recalled = new Set();
+  try { for (const x of (wallet.recallRecords() || [])) recalled.add(String(x.recalledTxidHex || '').toLowerCase()); } catch (_) {}
+  // Offer Recall once BOTH halves are past by the device clock (a tick value is a unix-second
+  // stamp); Nabla's door and Core judge the real time — a click before it is refused, nothing moves.
+  const now = Math.floor(Date.now() / 1000);
+  const rows = [];
+  for (const r of sends) {
+    let t = null;
+    try { t = wallet.retainedSendTribunal(r.txid); } catch (_) {}
+    if (!t || t.escrowTxidHex) continue;   // not a Tribunal escrow (a plain send or a PRIEST fee)
+    const due = now >= Number(t.recallMaturityTick) && now >= Number(t.recallMaturityUnix);
+    const when = new Date(Number(t.recallMaturityUnix) * 1000).toLocaleString();
+    const state = recalled.has(String(r.txid).toLowerCase()) ? '<span class="muted">recall started</span>'
+      : due ? `<button class="trib-recall" data-txid="${r.txid}">Recall</button>`
+            : `<span class="muted">recall from ${when}</span>`;
+    rows.push(`<div class="tier"><span class="t">${formatAxc(BigInt(r.amount))} → ${r.counterparty || '?'}`
+      + ` · ${t.p} of ${t.priests.length} approvals</span>${state}</div>`);
+  }
+  for (const f of unsent) {
+    rows.push(`<div class="tier"><span class="t">⚠ PRIEST fee not sent · ${formatAxc(BigInt(f.fee))} → ${f.priest}`
+      + `<br><span class="muted" style="font-size:11px">${f.error}</span></span>`
+      + `<button class="trib-fee" data-escrow="${f.escrowTxidHex}" data-priest="${f.priest}">Send fee</button></div>`);
+  }
+  if (!rows.length) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  list.innerHTML = rows.join('');
+}
+
+$('s-trib-sent-list').addEventListener('click', async e => {
+  const rc = e.target.closest('.trib-recall');
+  const fb = e.target.closest('.trib-fee');
+  if (!wallet || (!rc && !fb)) return;
+  if (rc) {
+    // The escrow by its txid (`recallTxidHex`) — never "the last send" (a fee came after it).
+    const txid = rc.dataset.txid;
+    await runHalOp((w, t, p, s) => recall(w, t, Object.assign({}, p, { recallTxidHex: txid }), s),
+      'Recall payment', rc, $('s-trib-sent-out'), 'recall this payment', 'witness', tribunalErr);
+    renderTribunalSent();
+    return;
+  }
+  if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
+  if (!(await askKey('send this PRIEST fee'))) return;
+  fb.disabled = true; showProg('Sending PRIEST fee…');
+  try {
+    const host = ($('c-host')?.value.trim() || 'axiom-dev.mooo.com').replace(/:\d+$/, '');
+    const maildir = `${PARENT}/${wallet.info().name}/maildir`;
+    const params = { validators: envValidators(), inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
+                     pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS };
+    const r = await withReceivePump(host, () => sendUnsentTribunalFee(wallet, mkTransport(host, 'witness'),
+      fb.dataset.escrow, fb.dataset.priest, params, stepProgress('Send fee')));
+    setMsg(`PRIEST fee sent to ${fb.dataset.priest} · txid ${String(r.txid).slice(0, 16)}…`, 'ok');
+    renderOverview();
+  } catch (err) {
+    setMsg('PRIEST fee not sent — ' + tribunalErr(err), 'err');
+  } finally {
+    fb.disabled = false; hideProg(); renderTribunalSent(); refreshInterruptedSendBox();
+  }
+});
 
 // Send — full SendMachine: build TX → CL1 → S-ABR k-witness round over TOT
 // → register → balance debited. Receiver-pays: sender loses only the amount.
@@ -1587,6 +1878,12 @@ $('s-send').onclick = async () => {
   if (!wallet) return;
   if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
   const amountAtoms = BigInt(Math.round(amt * Number(atomsPerAxc())));
+  // YPX-026: a conditional payment's terms are checked by the SDK BEFORE any gate or network.
+  let trib = null;
+  if ($('s-trib').checked) {
+    try { trib = _mod.tribunalTerms(tribunalParamsFromForm()); }
+    catch (e) { setMsg(tribunalErr(e), 'err'); return; }
+  }
   if (!(await dvSendGate(amountAtoms))) return;     // dv-change verify gate (1/3…3/3)
   if (!(await askKey(`send ${amt} AXC`))) return;   // re-auth gate
   const btn = $('s-send'); btn.disabled = true;
@@ -1595,7 +1892,7 @@ $('s-send').onclick = async () => {
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const transport = mkTransport(host, 'witness');
     const params = {
-      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      validators: envValidators(),
       // no k — the WASM derives it from the artifact (YP §17.3.1.4, KI#150)
       inboxNew: `${maildir}/inbox/new`,
       inboxCur: `${maildir}/inbox/cur`,
@@ -1605,10 +1902,22 @@ $('s-send').onclick = async () => {
     };
     setMsg(`Sending ${amt} AXC to ${to}…`, 'warn');
     showProg(`Sending ${amt} AXC to ${to}…`);
-    const r = await withReceivePump(host, () => send(wallet, transport, to, amountAtoms, '', params, stepProgress('Send')));
-    renderOverview();
-    tab('overview');
-    setMsg(`Sent ${amt} AXC to ${to} · txid ${String(r.txid).slice(0, 16)}… · registered=${r.registered}`, 'ok');
+    if (trib) {
+      // Escrow, then one fee per PRIEST — each fee's own result; the page never re-runs one.
+      const r = await withReceivePump(host, () => sendTribunal(wallet, transport, to, amountAtoms, '', trib, params, stepProgress('Send')));
+      renderOverview();
+      const bad = r.fees.filter(f => f.error);
+      setMsg(`Conditional payment of ${amt} AXC sent to ${to} · txid ${String(r.escrow.txid).slice(0, 16)}… · `
+        + `${r.fees.length - bad.length} of ${r.fees.length} PRIEST fee(s) sent`
+        + (bad.length ? ` — not sent: ${bad.map(f => f.priest + (f.unsent ? ' (Send fee below)' : ' (saved round — see the interrupted-send box)')).join(', ')}` : ''),
+        bad.length ? 'warn' : 'ok');
+      renderTribunalSent();
+    } else {
+      const r = await withReceivePump(host, () => send(wallet, transport, to, amountAtoms, '', params, stepProgress('Send')));
+      renderOverview();
+      tab('overview');
+      setMsg(`Sent ${amt} AXC to ${to} · txid ${String(r.txid).slice(0, 16)}… · registered=${r.registered}`, 'ok');
+    }
     $('s-to').value = ''; $('s-amt').value = '';
   } catch (e) {
     // YPX-001 §1.5.1 — the consent gate PAUSED this payment. It is NOT a
@@ -1617,8 +1926,17 @@ $('s-send').onclick = async () => {
     if (e && e.code === 'ScarConsentRequired') {
       setMsg('Payment paused — the receiver must consent before they can accept this money.', 'warn');
       console.info('[axiom] scar-consent pause', e);
+    } else if (e && e.code === 'ScarSettling') {
+      // ForkSettlement §4 (R3) — money this wallet RECEIVED is still settling
+      // at Nabla. The SDK refused before any witness: nothing moved. Messenger
+      // text only; the wait is the SDK's verdict (recovery "RetryAfter(N)").
+      const m = /RetryAfter\((\d+)\)/.exec(String(e.recovery || ''));
+      const secs = m ? Number(m[1]) : null;
+      setMsg('Received money is still settling — nothing was sent. Try again'
+        + (secs !== null ? ` in about ${secs} s.` : ' shortly.'), 'warn');
+      console.info('[axiom] scar settling', e);
     } else {
-      setMsg('Send failed — ' + errOf(e), 'err');
+      setMsg('Send failed — ' + tribunalErr(e), 'err');
       console.error('[axiom] send failed', e);
     }
   } finally {
@@ -1626,7 +1944,7 @@ $('s-send').onclick = async () => {
     // offer it whenever one is stashed (genesis.js send() stashes on
     // success; a sub-quorum send is a no-op under the quorum gate, so a
     // failure stashes nothing).
-    try { if (wallet.hasRecallableSend) $('s-recall-box').style.display = ''; } catch (_) {}
+    showGenericRecall();
     // Resumable rounds: a per-hop timeout just persisted the round — surface
     // the Resume/Discard affordance immediately (the catch above showed the
     // "Send failed — …" timeout message).
@@ -1713,9 +2031,17 @@ function refreshInterruptedSendBox() {
     if (!box) return;
     if (rs) {
       box.style.display = '';
+      // DeclaredWitnessSet (ruled 2026-10-08): the SDK saved the round and REPORTS
+      // which declared witness did not sign; the USER decides — Resume (same set, one
+      // pass) or Discard. Nothing here resumes on its own.
+      let why = '';
+      try {
+        const r = (wallet.pendingRounds ? wallet.pendingRounds() : [])[0];
+        if (r) why = ' Waiting on: ' + r.outstanding.map(o => `${o.validatorId.slice(0, 8)} (${o.outcome})`).join(', ') + '.';
+      } catch (_) {}
       $('s-interrupted-detail').textContent =
-        `To ${rs.to} · ${formatAxc(BigInt(rs.amount))} · ${rs.sigsHave}/${rs.sigsNeeded} witnesses collected. ` +
-        `A response arriving after the timeout still counts — Resume sweeps it and continues the same payment.`;
+        `To ${rs.to} · ${formatAxc(BigInt(rs.amount))} · ${rs.sigsHave}/${rs.sigsNeeded} witnesses collected.${why} ` +
+        `A response arriving after the timeout still counts — Resume sweeps it and asks only the declared witnesses still owed.`;
     } else {
       box.style.display = 'none';
     }
@@ -1731,14 +2057,47 @@ $('s-resume').onclick = async () => {
   refreshScarConsentBox();
 };
 
-// Discard the interrupted round (nothing from it was committed; balance
-// untouched). Pure-local — no network.
+// Discard the interrupted round. Pure-local — no network.
+// KI#397 (2026-10-24) — the SAME commit-bound hold the harness applies
+// (tests/round_policy.py `suspected_committer_hold`): the round's REPORT (signed /
+// suspectedCommitters, the SDK's own `RoundReport`, read, never recomputed) says whether a
+// validator may already hold its PENDING row. If so, and the round is younger than the
+// commit bound, the page asks for an explicit confirm and says the truth: signatures were
+// given, the round may have COMMITTED, the discard records those members as poisoned
+// committers + the tip as garbage, and heal() is the way back (diagnose() says when).
+// ~~"Interrupted send discarded — nothing was committed."~~ — said even after k−1
+// signatures; a member that signed may hold the row (KI#313 / KI#356).
+const ROUND_COMMIT_WAIT_SECS = 30 * 60;   // = round_policy.HEAL_COMMIT_WAIT_SECS (harness default)
+function roundMayHaveCommitted(r) {
+  return !!r && ((r.signed || []).length > 0 || (r.suspectedCommitters || []).length > 0);
+}
 $('s-discard').onclick = () => {
   if (!wallet) return;
-  try { wallet.discardResumableSend(); } catch (_) {}
+  let r = null, rs = null;
+  try { r = (wallet.pendingRounds ? wallet.pendingRounds() : [])[0] || null; } catch (_) {}
+  try { rs = wallet.resumableSend ? wallet.resumableSend() : null; } catch (_) {}
+  const committed = roundMayHaveCommitted(r);
+  const ageSecs = rs && rs.createdAtSecs ? Math.max(0, Math.floor(Date.now() / 1000) - Number(rs.createdAtSecs)) : Infinity;
+  if (committed) {
+    const n = (r.signed || []).length, sus = (r.suspectedCommitters || []).length;
+    const held = ageSecs < ROUND_COMMIT_WAIT_SECS;
+    const text = `${n} declared witness(es) already SIGNED this send` +
+      (sus ? ` and ${sus} may have signed after the timeout` : '') +
+      ` — the round may already be COMMITTED at a validator.` +
+      (held ? ` It is only ${ageSecs}s old; Resume is the safe choice (it collects the late replies).` : '') +
+      `\n\nDiscarding records those members as poisoned committers and this state as garbage; ` +
+      `the wallet then needs heal() before its next send. Discard anyway?`;
+    if (!confirm(text)) return;
+  }
+  try { wallet.abandonRound('send'); } catch (_) {}
   refreshInterruptedSendBox();
   refreshScarConsentBox();
-  setMsg('Interrupted send discarded — nothing was committed.', 'ok');
+  if (committed) {
+    setMsg('Interrupted send discarded — signatures had been given, so the round may have committed: ' +
+           'its signers are recorded as poisoned committers. Run heal (Overview) before the next send.', 'warn');
+  } else {
+    setMsg('Interrupted send discarded — no witness had signed, nothing was committed.', 'ok');
+  }
 };
 
 // YPX-001 §1.5.1 — complete the paused payment with the receiver's passcode.
@@ -1759,7 +2118,7 @@ $('s-scar-send').onclick = async () => {
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const transport = mkTransport(host, 'witness');
     const params = {
-      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      validators: envValidators(),
       // no k — the WASM derives it from the artifact (YP §17.3.1.4, KI#150)
       inboxNew: `${maildir}/inbox/new`,
       inboxCur: `${maildir}/inbox/cur`,
@@ -1924,8 +2283,8 @@ function closeSessionPool() {
 //
 // ⚠ DO NOT SHIP A DEFAULT FOR THIS and do not let it become "the browser's
 // transport". A released browser wallet needs a real answer with an auth story
-// (Sonny, 2026-09-07: "we may/maynot to upgrade the subsystem to be a release
-// version for validator in the future"). Until then a real-email wallet cannot
+// (ruled 2026-09-07: the subsystem may or may not be upgraded to a release
+// version for validators in the future). Until then a real-email wallet cannot
 // receive in a published build, and the UI must not pretend otherwise.
 function testFetchUrl() {
   const el = $('r-testfetch');
@@ -1969,7 +2328,7 @@ function recvHost() { return ($('r-tot').value.trim() || 'axiom-dev.mooo.com:740
 // deliveries as `messageType` (witness/redeem) from this wallet's address.
 function mkTransport(host, messageType) {
   return makeTotTransport(totConfigFrom({
-    validators: ENV_VALIDATORS.map(([, n], i) => ({ email: `${n}@axiom`, totWs: `ws://${host}:${7400 + i}` })),
+    validators: ENV_VALIDATORS.map(([, , , email], i) => ({ email, totWs: `ws://${host}:${7400 + i}` })),
     nablas: NABLAS,
     nablaTotWs: `ws://${host}:7400`,
     fromEmail: wallet.info().email,
@@ -1981,7 +2340,7 @@ function mkTransport(host, messageType) {
 function recvParams() {
   const maildir = `${PARENT}/${wallet.info().name}/maildir`;
   return {
-    validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+    validators: envValidators(),
     inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
     pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
   };
@@ -2033,17 +2392,95 @@ if ($('r-check-mode')) {
   };
 }
 function renderCheques(pend) {
+  lastCheques = pend || [];
   const el = $('r-cheques');
   if (!pend || !pend.length) { el.textContent = 'None yet.'; return; }
+  // KI#308 / KI#395 — "Claim pending — redeem first / forfeit" (YP-SDK §4.6a, YP §1B.5 item 5).
+  // A cheque this wallet CLAIMED at Nabla and has not redeemed blocks every other op
+  // (PendingChequeClaim). The page OFFERS both exits and takes neither on its own; when the
+  // SDK recorded a deterministic refusal after the claim (`refused`), the redeem would be
+  // refused again — diagnose() says which exit applies (heal, or forfeit so the sender can
+  // recall). ~~no caller of forfeitPendingChequeClaim~~ (KI#395 (d)).
+  let claims = {};
+  try { for (const c of (wallet.pendingChequeClaims() || [])) if (!c.forfeitConsented) claims[c.chequeId] = c; } catch (_) {}
+  let advice = [];
+  try { advice = wallet.diagnose() || []; } catch (_) {}
   el.innerHTML = pend.map(c => {
     // The genesis/airdrop cheque is a self-send of 1 AXC — label it as the
     // airdrop instead of showing the wallet's own address as the "sender".
     const amt = `${formatAxc(BigInt(c.amount))}${lDollar(c.amount) ? ' · ' + lDollar(c.amount) : ''}`;
     const who = c.isGenesisAirdrop ? '1 AXC airdrop' : c.sender;
+    const claim = claims[c.chequeId];
+    let note = '';
+    if (claim) {
+      const a = advice.find(x => x.detail === c.chequeId);
+      note = `<div class="muted" style="font-size:11px; margin:.2rem 0">` +
+        (claim.refused
+          ? `⚠ Claim pending — its redeem was REFUSED (${claim.refused}). ${a ? a.reason : ''}`
+          : `⏳ Claim pending — redeem first. Every other transaction is refused until this cheque is redeemed or forfeited.`) +
+        `</div>` +
+        `<button class="fft secondary" data-cheque="${c.chequeId}">Forfeit claim…</button>`;
+    }
+    // YPX-026 — a PRIEST fee: Approve (bless) or Reject — paid either way (§4.5c-1).
+    if (c.isPriestFee && c.ready) {
+      return `<div class="tier"><span class="t">${amt} · PRIEST fee from ${who}</span>` +
+        `<button class="rdm" data-cheque="${c.chequeId}" data-mode="bless">Approve</button>` +
+        `<button class="rdm secondary" data-cheque="${c.chequeId}" data-mode="reject">Reject</button>${note}</div>`;
+    }
+    // YPX-026 — a Tribunal payment: Redeem only once the SDK says it is satisfiable (approvals
+    // + maturity); the page shows the SDK's own "waiting" line. Core enforces it anyway.
+    if (c.isTribunal && c.ready) {
+      const st = tribunalStatusCache[c.chequeId];
+      const ok = st && st.satisfiable;
+      const line = !st ? 'conditional payment — check its approvals'
+        : ok ? `approved by ${st.approved.length} of ${st.priests.length} — ready to redeem`
+             : `${st.approved.length} of ${st.p} approvals · ${st.waiting || 'waiting'}`;
+      return `<div class="tier"><span class="t">${amt} · ${who}<br><span class="muted" style="font-size:11px">${line}</span></span>` +
+        `<button class="tst secondary" data-cheque="${c.chequeId}">Check approvals</button>` +
+        `<button class="rdm" data-cheque="${c.chequeId}"${ok ? '' : ' disabled'}>Redeem</button>${note}</div>`;
+    }
     return `<div class="tier"><span class="t">${amt} · ${who}</span>` +
-      `<button class="rdm" data-cheque="${c.chequeId}"${c.ready ? '' : ' disabled'}>${c.ready ? 'Redeem' : 'waiting…'}</button></div>`;
+      `<button class="rdm" data-cheque="${c.chequeId}"${c.ready ? '' : ' disabled'}>${c.ready ? 'Redeem' : 'waiting…'}</button>${note}</div>`;
   }).join('');
 }
+
+// YPX-026 — Bob's status reads (`tribunalStatus`: each approval verified by Core's CL4 in the
+// browser). Cached per cheque only for display; every redeem is still judged by Core.
+const tribunalStatusCache = {};
+let lastCheques = [];
+$('r-cheques').addEventListener('click', e => {
+  const b = e.target.closest('.tst'); if (!b || !wallet) return;
+  try {
+    tribunalStatusCache[b.dataset.cheque] = wallet.tribunalStatus(b.dataset.cheque);
+    setMsg('');
+  } catch (err) {
+    setMsg('Could not read the approvals — ' + tribunalErr(err), 'err');
+  }
+  renderCheques(lastCheques);
+});
+
+// KI#395 (d) — the user INSISTS on giving the claimed cheque up: the SDK's dedicated
+// override (KI#308/#310) RELEASES the claim at Nabla first, so the sender can recall it,
+// then lifts the guard for this cheque only. Explicit, confirmed, never automatic.
+$('r-cheques').addEventListener('click', async e => {
+  const b = e.target.closest('.fft'); if (!b || !wallet) return;
+  const chequeId = b.dataset.cheque;
+  if (!confirm('Forfeit this cheque?\n\nThis wallet CLAIMED it at Nabla. Forfeiting RELEASES the ' +
+               'claim so the sender can recall the payment — you will never be able to redeem it. ' +
+               'Redeem it instead if you can.')) return;
+  if (!(await askKey('forfeit this cheque claim'))) return;   // re-auth gate
+  b.disabled = true; b.textContent = 'forfeiting…';
+  try {
+    const rhost = recvHost();
+    const r = await wallet.forfeitPendingChequeClaim(mkTransport(rhost, 'redeem'), NABLAS, chequeId);
+    setMsg(`Claim of ${chequeId} released at ${r && r.node ? r.node : 'Nabla'} — the sender can recall it; ` +
+           `other transactions are no longer blocked by it.`, 'ok');
+    await receiveCycle();
+  } catch (err) {
+    setMsg('Forfeit failed — ' + errOf(err) + ' (nothing was released; the claim still blocks other ops)', 'err');
+    b.disabled = false; b.textContent = 'Forfeit claim…';
+  }
+});
 async function receiveCycle() {
   const host = recvHost();
   purgeMaildirCur(); // reclaim localStorage before writing the pulled mail
@@ -2082,7 +2519,7 @@ async function receiveCycle() {
 // earlier version of this comment claimed a VBC "cannot come in this way"
 // because signatures live at `{wallet.dir()}/pending_round/vbc_sigs.cbor`; that
 // confused where they are KEPT AFTER EXTRACTION with how they ARRIVE. Corrected
-// 2026-09-07 (Sonny: "VBC is still with the mail path").
+// 2026-09-07 (ruling: VBC stays on the mail path).
 //
 // The assembly logic is in the SHARED layer and is reachable from here —
 // `sdk/core/src/validator_join.rs` (`VbcIssuerSignature`, `collected`,
@@ -2180,10 +2617,44 @@ $('r-refresh').onclick = async () => {
 $('r-cheques').addEventListener('click', async e => {
   const b = e.target.closest('.rdm'); if (!b || b.disabled || !wallet) return;
   const chequeId = b.dataset.cheque;
+  const mode = b.dataset.mode || 'redeem';            // YPX-026: 'bless' / 'reject' on a PRIEST fee
+  await redeemCheque(b, chequeId, mode);
+});
+
+// KI#378 — a redeem whose declared witness did not sign is SAVED by the SDK and REPORTED
+// (`RoundIncomplete` + `roundReport`); a later Redeem of that cheque returns the same report.
+// The USER decides: Resume (same witnesses, same envelope — late replies still count) or
+// Discard (kept under abandoned/, a fresh redeem can then run). Nothing here retries itself.
+async function offerSavedRedeemRound(err, b, chequeId) {
+  const r = err && err.roundReport;
+  if (!r || r.kind !== 'redeem' || !wallet) return false;
+  const owed = (r.outstanding || []).map(o => `${String(o.validatorId).slice(0, 8)} (${o.outcome})`).join(', ');
+  if (r.canResume) {
+    if (confirm(`This redeem is saved, waiting on: ${owed || 'its witnesses'}.\n\n` +
+                `Resume now? (A reply that arrived late still counts.) Cancel keeps it saved.`)) {
+      await redeemCheque(b, chequeId, 'resume');
+      return true;
+    }
+    return false;
+  }
+  if (confirm(`This redeem round cannot be resumed (${owed || 'a witness refused'}).\n\n` +
+              `Discard the saved round so a fresh redeem can run? It is kept under "abandoned" and can be restored.`)) {
+    try { wallet.abandonRound('redeem'); setMsg('Saved redeem round discarded — Redeem again to start a fresh one.', 'ok'); }
+    catch (e) { setMsg('Discard failed — ' + errOf(e), 'err'); }
+    return true;
+  }
+  return false;
+}
+
+async function redeemCheque(b, chequeId, mode) {
+  const verb = { redeem: 'redeem this cheque', bless: 'approve this payment (and collect your fee)',
+                 reject: 'reject this payment (and collect your fee)',
+                 resume: 'resume this saved redeem' }[mode];
+  const label0 = b.textContent;
   if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
-  if (!(await askKey('redeem this cheque'))) return;   // re-auth gate
-  b.disabled = true; b.textContent = 'redeeming…'; setMsg('');
-  showProg('Redeeming cheque…');
+  if (!(await askKey(verb))) return;   // re-auth gate
+  b.disabled = true; b.textContent = 'working…'; setMsg('');
+  showProg(mode === 'redeem' || mode === 'resume' ? 'Redeeming cheque…' : mode === 'bless' ? 'Approving…' : 'Rejecting…');
   const rhost = recvHost();
   try {
     // KI#34 WI2/WI5 — pick which Nablas verify this cheque per the wallet's
@@ -2192,28 +2663,39 @@ $('r-cheques').addEventListener('click', async e => {
     const params = recvParams();
     const hint = wallet.chequeNablaHint(chequeId) || null;
     params.nablaTcpAddresses = selectNablas(getCheckMode(), hint);
-    const r = await withReceivePump(rhost, () => redeem(wallet, mkTransport(rhost, 'redeem'), chequeId, params, stepProgress('Redeem')));
+    const r = await withReceivePump(rhost, () => redeem(wallet, mkTransport(rhost, 'redeem'), chequeId, params, stepProgress('Redeem'), mode));
     renderOverview();
-    setMsg(`Redeemed ${chequeId} · balance ${formatAxc(BigInt(r.newBalance))}`, 'ok');
+    // ForkSettlement §4 (R3) — informational: an origin still settling leaves a
+    // transient scar that clears by itself (sends meanwhile say "settling").
+    const settleNote = r.originSettlement === 'settling'
+      ? ` · sender's payment settles in ~${r.settlesInSecs} s` : '';
+    const refused = legRefusalNote(r) || heldNote(r);
+    const did = { redeem: 'Redeemed', resume: 'Redeemed', bless: 'Approved — fee collected for', reject: 'Rejected — fee collected for' }[mode];
+    setMsg(`${did} ${chequeId} · balance ${formatAxc(BigInt(r.newBalance))}${settleNote}`
+      + (refused ? ' — ' + refused : ''), refused ? 'warn' : 'ok');
+    delete tribunalStatusCache[chequeId];
     await receiveCycle();
   } catch (err) {
-    setMsg('Redeem failed — ' + errOf(err), 'err');
-    b.disabled = false; b.textContent = 'Redeem';
+    // §4.5c-1 row 15: a hibernating PRIEST cannot APPROVE (the bless carries a claim), but a
+    // plain redeem — Reject — is unaffected.
+    const hib = mode === 'bless' && /WalletHibernating|E_WALLET_HIBERNATING/.test(String(err && (err.code || err.message) || err));
+    setMsg((mode === 'redeem' || mode === 'resume' ? 'Redeem' : mode === 'bless' ? 'Approve' : 'Reject') + ' failed — '
+      + (hib ? 'this wallet is hibernating, so it cannot approve now (Reject still works). ' : '') + tribunalErr(err), 'err');
+    b.disabled = false; b.textContent = label0;
+    hideProg();
+    await offerSavedRedeemRound(err, b, chequeId);
   } finally {
     hideProg();
   }
-});
+}
 
 // Raw banner ping through the /fatmama tunnel — proves browser→TOT→FATMAMA.
 function totFatmamaPing(totHost, idx, timeoutMs=7000) {
   return new Promise((resolve, reject) => {
-    // On https (hosted Pages) route through the Caddy gateway, mirroring kiddo.js
-    // gwWs — a raw ws:// is browser-blocked. Default the TOT port to 7400 if the
-    // entered host omits it, so /tot/<port> matches the gateway route (not /tot/80).
-    let url = `ws://${totHost}/fatmama/${idx}`;
-    if (typeof location !== 'undefined' && location.protocol === 'https:') {
-      try { const u = new URL(url); if (u.protocol === 'ws:') url = `wss://${u.hostname}/tot/${u.port || '7400'}${u.pathname}${u.search}`; } catch (_) {}
-    }
+    // THE TOT URL rule (transport.js totWsUrl, YPX-027 §8): a remote host is
+    // reached as wss://HOST/tot/PORT/… through its TLS front proxy; ws:// only
+    // for a loopback host. A host typed without a port means TOT port 7400.
+    const url = totWsUrl(`ws://${totHost}/fatmama/${idx}`);
     let ws; try { ws = new WebSocket(url); } catch(e){ reject(e); return; }
     ws.binaryType = 'arraybuffer';
     const t = setTimeout(() => { try{ws.close();}catch(_){} reject(new Error('timeout')); }, timeoutMs);
@@ -2224,7 +2706,7 @@ function totFatmamaPing(totHost, idx, timeoutMs=7000) {
 }
 $('r-test').onclick = async () => {
   const totHost = $('r-tot').value.trim();
-  $('r-conn').textContent = `Testing ws://${totHost}/fatmama/0 …`;
+  $('r-conn').textContent = `Testing ${totWsUrl(`ws://${totHost}/fatmama/0`)} …`;
   try {
     const smtp = await totFatmamaPing(totHost, 0);
     const pop3 = await totFatmamaPing(totHost, 1);
@@ -2247,18 +2729,31 @@ $('r-register').onclick = async () => {
 // has its own TOT at host:7400+i; every TOT tunnels /nabla/0..9 to the 10
 // Nabla nodes (127.0.0.1:7300..7309 — the SDK-facing addresses). IDs from
 // tests/genesis_claim_smoke.py.
+// BEGIN GENERATED ENV_VALIDATORS (scripts/gen_validator_lists.py — do not edit by hand)
+// [validatorId, name, ed25519Pk, email, feeRateBps] — feeRateBps: the PUBLISHED rate the receiver
+// declares and pays each redeem witness (KI#545, YP §20.8; the dev list's 0.1% = 10). DeclaredWitnessSet Q9 (ruled 2026-10-08): a
+// validator whose Ed25519 key the wallet does not know is NOT selectable (it cannot be
+// declared). ⚠ THIS block is still the hand-copied DEV fleet's (keys from the dev
+// `validators.list` column 3 on 2026-10-08; zeta / theta / iota unkeyed = never declared;
+// `<name>@axiom` = the dev FATMAMA address). At genesis the ceremony POST regenerates it from
+// the ceremony output (scripts/gen_validator_lists.py --install), which REFUSES an empty key
+// and any @axiom / @axiom.internal address. The email column replaced a hardcoded
+// `${n}@axiom` in envValidators()/mkTransport() (2026-10-10, ReleaseReadiness §3 Q9).
 const ENV_VALIDATORS = [
-  ['39afd6a1b4a9fee2c44f9c60b96b5b2048ed4db3d5e9a704b21c077469e72f15','alpha'],
-  ['c9f0502959c5d220077d2a781c63eee5c09e645a732ba377a2f49acc2eb22236','beta'],
-  ['83cabd196228fb2474b8c63259f6f7a442f9647f9e54945b2c3a668b215abd0a','gamma'],
-  ['b997f47b7054c74630cda13e65d8c881461687d2d83f1997c72d536f8941ed2d','delta'],
-  ['56afd350f72d89f542013efc245941fb4a148056b201fe5578428903f1e32d42','epsilon'],
-  ['c9961ad68a207dfa2ecbb7e38d6109f8100ee2f40873c6cffbe59680db28aae4','zeta'],
-  ['e9aee711d6b3487fc6c0769805967b4b0b186a124568e0ff65ddb0c34a90fc62','eta'],
-  ['d52c43af47df6985e861a8c08d903e80c7a415dd1144c360d4dd73f5ec0e4fed','theta'],
-  ['3cfe3076801ba3150cbe70ac1cdc02a393ef53bc0a78764c860a4ec5b1495600','iota'],
-  ['ebc58774adb28e5c80a81dce0b9411c25fd35c23be31ace983dffb53765e22f3','kappa'],
+  ['39afd6a1b4a9fee2c44f9c60b96b5b2048ed4db3d5e9a704b21c077469e72f15','alpha','a61dc74c4e6f680817df2d7df4c9c28e36a7ecd5e18d21932e17d89ae4ef853b','alpha@axiom',0],
+  ['c9f0502959c5d220077d2a781c63eee5c09e645a732ba377a2f49acc2eb22236','beta','77589adb4c85ca7c18383318905ffc8f6111d5a9864c964405374ffb18f1b86f','beta@axiom',5],
+  ['83cabd196228fb2474b8c63259f6f7a442f9647f9e54945b2c3a668b215abd0a','gamma','4b3325d4cc317e7293350feadddf7755c1e70259fb15dedbedbc483982822f7a','gamma@axiom',10],
+  ['b997f47b7054c74630cda13e65d8c881461687d2d83f1997c72d536f8941ed2d','delta','0f0aba46e08ea1d8c95d7f58824f9db5bd97cfe84c25143c875243f3f67f3a8b','delta@axiom',15],
+  ['56afd350f72d89f542013efc245941fb4a148056b201fe5578428903f1e32d42','epsilon','c00758ad8d22b4d0bd1d0ce34d95bd37ecc3b65b8a63e780ef403cc9a305fb2c','epsilon@axiom',20],
+  ['c9961ad68a207dfa2ecbb7e38d6109f8100ee2f40873c6cffbe59680db28aae4','zeta','','zeta@axiom',25],
+  ['e9aee711d6b3487fc6c0769805967b4b0b186a124568e0ff65ddb0c34a90fc62','eta','e8b271445b4d92e22242c51265b01197d9af14d878d8ece8ce24ca6647d75364','eta@axiom',30],
+  ['d52c43af47df6985e861a8c08d903e80c7a415dd1144c360d4dd73f5ec0e4fed','theta','','theta@axiom',7],
+  ['3cfe3076801ba3150cbe70ac1cdc02a393ef53bc0a78764c860a4ec5b1495600','iota','','iota@axiom',12],
+  ['ebc58774adb28e5c80a81dce0b9411c25fd35c23be31ace983dffb53765e22f3','kappa','d38744e3433c61e420b465e6d834581025260bf4e11034fc6de2203deef38bbc','kappa@axiom',30],
 ];
+// END GENERATED ENV_VALIDATORS
+// The params shape every round takes (`validators: [{validatorId, email, ed25519Pk, feeRateBps}]`).
+const envValidators = () => ENV_VALIDATORS.map(([id, , pk, email, feeRateBps]) => ({ validatorId: id, email, ed25519Pk: pk || undefined, feeRateBps }));
 const NABLAS = Array.from({ length: 10 }, (_, i) => `127.0.0.1:${7300 + i}`);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -2356,7 +2851,7 @@ async function runGenesisClaim({ amountAtoms, tier = 0, btn, out, authReason }) 
     const witnessTr = mkTransport(host, 'witness');
     const redeemTr = mkTransport(host, 'redeem');
     const common = {
-      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      validators: envValidators(),
       // no k — the WASM derives it from the artifact (YP §17.3.1.4, KI#150)
       inboxNew: `${maildir}/inbox/new`,
       inboxCur: `${maildir}/inbox/cur`,
@@ -2381,7 +2876,7 @@ async function runGenesisClaim({ amountAtoms, tier = 0, btn, out, authReason }) 
     // The receive pump drains FATMAMA into the inbox throughout, so the
     // witness rounds (and the cheque) actually arrive.
     const r = await withReceivePump(host, async () => {
-      const claimRes = await claimGenesis(wallet, witnessTr, { ...common, amount: amountAtoms, reference: tier ? 'stake-claim' : 'sdk', offeredFee: 100n }, stepProgress('Fund'));
+      const claimRes = await claimGenesis(wallet, witnessTr, { ...common, amount: amountAtoms, reference: tier ? 'stake-claim' : 'sdk' }, stepProgress('Fund'));
       log(`  txid ${String(claimRes.txid).slice(0, 16)}…  registered=${claimRes.registered}`);
       renderOverview();
 
@@ -2401,6 +2896,11 @@ async function runGenesisClaim({ amountAtoms, tier = 0, btn, out, authReason }) 
     });
     renderOverview();
     out.innerHTML += `<span class="ok">Done — balance ${formatAxc(BigInt(r.newBalance))}</span>`;
+    const refused = legRefusalNote(r) || heldNote(r);
+    if (refused) {   // textContent: the SDK message is never parsed as HTML
+      const w = document.createElement('span'); w.className = 'warn'; w.textContent = '\n' + refused;
+      out.appendChild(w);
+    }
   } catch (e) {
     out.innerHTML += `<span class="err">FAILED: ${errOf(e)}</span>`;
     console.error('[axiom] claim failed', e);
@@ -2412,7 +2912,7 @@ async function runGenesisClaim({ amountAtoms, tier = 0, btn, out, authReason }) 
 
 // ── Validator tab — SPECIAL FEATURES (informational) ──────────────────────
 //
-// A wallet client stays a wallet client (Sonny, 2026-09-07). This tab explains
+// A wallet client stays a wallet client (ruled 2026-09-07). This tab explains
 // the validator stake and hands the operator their wallet; it does NOT claim.
 //
 // ⚠ WHY IT DOES NOT CLAIM, measured rather than assumed. A browser claim was
@@ -2512,11 +3012,12 @@ $('v-register').onclick = async () => {
   const out = $('v-reg-out'); out.textContent = '';
   if (!wallet) { setMsg('open a wallet first', 'err'); return; }
   const f = $('v-vbc').files && $('v-vbc').files[0];
-  if (!f) { setMsg('choose the certificate file (vbc.json) first', 'err'); return; }
+  if (!f) { setMsg('choose the certificate file (vbc-bundle.cbor) first', 'err'); return; }
   const btn = $('v-register'); btn.disabled = true;
   try {
-    const text = await f.text();
-    const req = wallet.buildRegisterVbcRequest(text);
+    // ValidatorJoin §6b.12 — the certificate file is Core's bundle in CBOR: bytes, never text.
+    const bundle = new Uint8Array(await f.arrayBuffer());
+    const req = wallet.buildRegisterVbcRequest(bundle);
     const host = location.hostname || '127.0.0.1';
     const transport = mkTransport(host, 'witness');
     let stamped = null, lastErr = null;
@@ -2525,17 +3026,17 @@ $('v-register').onclick = async () => {
       try { reply = await transport.nablaTcp(addr, req); }
       catch (e) { lastErr = e; out.textContent += `${addr}: unreachable (${e.message || e})\n`; continue; }
       // A decoded refusal throws with Nabla's status + reason; do not retry it.
-      stamped = wallet.applyRegisterVbcResponse(text, reply);
+      stamped = wallet.applyRegisterVbcResponse(bundle, reply);
       out.textContent += `${addr}: OK — stamped\n`;
       break;
     }
     if (!stamped) throw lastErr || new Error('no Nabla node reachable');
-    const url = URL.createObjectURL(new Blob([stamped], { type: 'application/json' }));
+    const url = URL.createObjectURL(new Blob([stamped], { type: 'application/cbor' }));
     const a = document.createElement('a');
-    a.href = url; a.download = 'vbc.json';
+    a.href = url; a.download = 'vbc-bundle.cbor';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setMsg('certificate registered — stamped vbc.json downloaded; copy it back to the validator', 'ok');
+    setMsg('certificate registered — stamped vbc-bundle.cbor downloaded; copy it back to the validator config/', 'ok');
   } catch (e) {
     const m = (e && (e.message || e.msg)) || String(e);
     out.textContent += `refused: ${m}\n`;
@@ -2563,7 +3064,7 @@ $('ov-heal').onclick = async () => {
   try {
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const params = {
-      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      validators: envValidators(),
       inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
     };
@@ -2595,7 +3096,7 @@ $('ov-burn').onclick = async () => {
   try {
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const params = {
-      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      validators: envValidators(),
       inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
     };
@@ -2613,7 +3114,7 @@ $('ov-burn').onclick = async () => {
 // witness-typed self-send shape as heal; the WASM fund fn picks the kind.
 // Re-anchor hibernates the wallet; complete clears it. Runs the real
 // protocol against the live env — not a simulation.
-async function runHalOp(opFn, label, btn, out, verb, ttype = 'witness') {
+async function runHalOp(opFn, label, btn, out, verb, ttype = 'witness', errText = errOf) {
   if (!wallet) return;
   if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
   if (!(await askKey(verb))) return;   // re-auth gate
@@ -2622,16 +3123,18 @@ async function runHalOp(opFn, label, btn, out, verb, ttype = 'witness') {
   try {
     const maildir = `${PARENT}/${wallet.info().name}/maildir`;
     const params = {
-      validators: ENV_VALIDATORS.map(([id, n]) => ({ validatorId: id, email: `${n}@axiom` })),
+      validators: envValidators(),
       inboxNew: `${maildir}/inbox/new`, inboxCur: `${maildir}/inbox/cur`,
       pollIntervalMs: 250, pollMaxRounds: 720, nablaTcpAddresses: NABLAS,
     };
     const r = await withReceivePump(host, () => opFn(wallet, mkTransport(host, ttype), params, stepProgress(label)));
     renderOverview();
-    setMsg(`${label} done · balance ${formatAxc(BigInt(r.newBalance))}`, 'ok');
+    const refused = legRefusalNote(r) || heldNote(r);   // HAL/recall completion IS a redeem
+    setMsg(`${label} done · balance ${formatAxc(BigInt(r.newBalance))}`
+      + (refused ? ' — ' + refused : ''), refused ? 'warn' : 'ok');
   } catch (e) {
-    out.innerHTML = `<span class="err">${errOf(e)}</span>`;
-    setMsg(`${label} failed — ` + errOf(e), 'err');
+    out.innerHTML = `<span class="err">${errText(e)}</span>`;
+    setMsg(`${label} failed — ` + errText(e), 'err');
   } finally {
     btn.disabled = false; hideProg();
   }
@@ -2647,6 +3150,36 @@ $('ov-hib-finish').onclick  = () => {
   // transport ('witness' intake rejects it with "missing field transaction").
   return runHalOp(openRecall ? recallComplete : halComplete, 'Finish recovery', $('ov-hib-finish'), $('hib-out'), 'finish recovery', 'redeem');
 };
+
+// KI#216 — the anchor offer's state + helpers are declared beside `wallet` (above).
+$('ov-anchor-skip').onclick = () => {
+  setAnchorSkipped();
+  anchorOffer = { fresh: false };
+  renderAnchorStatus();
+  setMsg('Not anchored — you can anchor any time from the Receive tab, before you share your address.', 'warn');
+};
+$('ov-anchor').onclick = () => runInitialAnchor($('ov-anchor'), $('anchor-out'));
+$('r-anchor').onclick = () => runInitialAnchor($('r-anchor'), $('r-anchor-out'));
+async function runInitialAnchor(btn, out) {
+  if (!wallet) return;
+  if (coreLocked) { setMsg(LOCK_MSG, 'err'); return; }
+  if (!(await askKey('anchor this wallet'))) return;   // re-auth gate
+  const host = ($('c-host')?.value.trim() || 'axiom-dev.mooo.com').replace(/:\d+$/, '');
+  btn.disabled = true; out.textContent = ''; setMsg(''); showProg('Anchoring wallet…');
+  try {
+    const r = await withReceivePump(host, () => initialAnchor(wallet, mkTransport(host, 'witness'), recvParams(), stepProgress('Anchor')));
+    anchorOffer = { fresh: false };
+    renderOverview();
+    setMsg(r.registered
+      ? 'Wallet anchored — its first state is bound to your key. You can share your address.'
+      : 'Wallet anchored (witnessed) — its Nabla registration did not complete; the wallet is still anchored to your key.', r.registered ? 'ok' : 'warn');
+  } catch (e) {
+    out.innerHTML = `<span class="err">${errOf(e)}</span>`;
+    setMsg('Anchor failed — ' + errOf(e), 'err');
+  } finally {
+    btn.disabled = false; hideProg();
+  }
+}
 
 $('ov-lock').onclick = () => { try { wallet?.close(); } catch(_){} wallet=null; location.reload(); };
 </script>

@@ -4,7 +4,7 @@
 // Promise cannot hold the wallet's `&mut self` borrow across an await:
 //
 //   wallet.claimGenesisFund(transport, params) -> Promise<outcome>   (network)
-//   wallet.commitGenesisFund(stateId, receipt, factChain)            (local, sync)
+//   wallet.commitGenesisFund(stateId, receipt, factChain, hibUntil)  (local, sync)
 //
 // `claimGenesis()` chains them so callers (the "Claim dev funds" button)
 // see one async call. Every outbound payload is a typed-UMP WitnessRequest
@@ -14,8 +14,7 @@
 // params: {
 //   amount,          // BigInt — atoms to claim
 //   reference,       // string — e.g. "sdk"
-//   offeredFee,      // BigInt — atoms (>= MIN_OFFERED_FEE)
-//   validators,      // [{ validatorId: hex64, email }]   (TOT-supported only)
+//   validators,      // [{ validatorId: hex64, email, ed25519Pk: hex64, feeRateBps }]  (TOT-supported only; Q9: no ed25519Pk ⇒ never declared; feeRateBps = the published rate the receiver pays, KI#545)
 //   (no k — the WASM derives the round's k from the artifact, YP §17.3.1.4 KI#150)
 //   inboxNew,        // "maildir/inbox/new"
 //   inboxCur,        // "maildir/inbox/cur"
@@ -50,6 +49,10 @@ export async function claimGenesis(wallet, transport, params, onStep) {
     hexToBytes(outcome.producedStateIdHex),
     outcome.receiptCbor,
     outcome.factChainCbor,
+    // §5.2.2c — the stake lock window a tier-2/3 claim's state carries (BigInt;
+    // 0n for an airdrop). Required: without it the wallet's state disagrees
+    // with the k-signed receipt.
+    outcome.producedHibernationUntil,
   );
 
   // Nabla register now runs INSIDE claimGenesisFund (after the witness
@@ -72,9 +75,15 @@ export async function claimGenesis(wallet, transport, params, onStep) {
 // (sync/local credit). Same fund→commit split rationale as claimGenesis.
 // `redeemParams`: { validators, nablaTcpAddresses, inboxNew, inboxCur,
 // pollIntervalMs, pollMaxRounds }. Returns the credited balance.
-export async function redeem(wallet, transport, chequeId, redeemParams, onStep) {
+// `mode` (YPX-026): 'redeem' (plain), 'bless' (a PRIEST APPROVES its fee — `blessFund`, the
+// only setter of the flag) or 'reject' (a PRIEST's fee redeemed without it — paid all the
+// same). ONE fund→commit tail for all three. KI#378: 'resume' re-enters this cheque's SAVED
+// redeem round (`resumeRedeem` — same declared set, same envelope); only the USER picks it.
+export async function redeem(wallet, transport, chequeId, redeemParams, onStep, mode = 'redeem') {
   const before = wallet.balance; // BigInt — to compute the credited delta
-  const outcome = await wallet.redeemFund(transport, chequeId, redeemParams, onStep || null);
+  const fund = { redeem: 'redeemFund', bless: 'blessFund', reject: 'rejectFund', resume: 'resumeRedeem' }[mode];
+  if (!fund) throw new Error(`redeem: unknown mode ${mode}`);
+  const outcome = await wallet[fund](transport, chequeId, redeemParams, onStep || null);
   stashOods(wallet, outcome);
   wallet.commitRedeem(
     hexToBytes(outcome.producedStateIdHex),
@@ -83,7 +92,24 @@ export async function redeem(wallet, transport, chequeId, redeemParams, onStep) 
     outcome.receiptCbor,
     outcome.factChainCbor,
     chequeId,
+    outcome.producedHibernationUntil, // KI#398 — Core's produced hibernation (BigInt)
+    outcome.producedWallClockLock,    // KI#398 — Core's produced lock (BigInt)
   );
+  // Fork Settlement W7e — record the register ack's provenance on the wallet
+  // (so diagnose() offers the burn exit of a HELD state) and relay the
+  // diagnose() line for the held cheque(s). Text only — nothing is burned.
+  let heldReason = null;
+  try {
+    if (outcome.provenance && outcome.provenance !== 'not_reported') {
+      wallet.recordProvenance(outcome.provenance, outcome.heldCheques || []);
+    }
+    if (outcome.provenance === 'held') {
+      const held = outcome.heldCheques || [];
+      heldReason = (wallet.diagnose() || [])
+        .filter(a => held.includes(a.detail) || (a.action === 'held' && !held.length))
+        .map(a => a.reason).join(' ') || null;
+    }
+  } catch (_) { /* record/report only — never fail the committed op */ }
   // Record the credit (covers both a genesis self-redeem and a normal
   // receive — one entry, no double-count with the fund phase).
   recordHistory(wallet, String(chequeId).split(':')[0], 'Redeem',
@@ -93,6 +119,17 @@ export async function redeem(wallet, transport, chequeId, redeemParams, onStep) 
     newBalance: outcome.newBalance,
     registered: outcome.registered,
     balance: wallet.balance, // now credited
+    // ForkSettlement §4 (R3) — the SDK's settle report, relayed as-is.
+    originSettlement: outcome.originSettlement,
+    settlesInSecs: outcome.settlesInSecs,
+    // Fork Settlement W7e-a — set when the redeem is credited (k-signed) but
+    // its Nabla registration was refused: the leg did not reproduce the
+    // validators' commitment (registered === false). Relayed as-is.
+    redeemLegRefusal: outcome.redeemLegRefusal || null,
+    // Fork Settlement W7e — "ok" | "settling" | "held" | "not_reported".
+    provenance: outcome.provenance,
+    heldCheques: outcome.heldCheques || [],
+    heldReason,
   };
 }
 
@@ -108,7 +145,11 @@ export async function claimAndRedeem(wallet, transport, claimParams, redeemParam
 // Normal send: sendFund (async/network — build TX → CL1 → k-witness round
 // over TOT → register) → commitSend (sync/local debit). `amountAtoms` is a
 // BigInt; `params` = { validators, nablaTcpAddresses, inboxNew, inboxCur,
-// pollIntervalMs, pollMaxRounds }. Returns the new (debited) balance.
+// pollIntervalMs, pollMaxRounds, declaredWitnesses? }. Returns the new (debited) balance.
+// DeclaredWitnessSet (ruled 2026-10-08): if a declared witness is silent / busy /
+// ban-refusing the SDK SAVES the round and throws `{code:'RoundIncomplete',
+// roundReport}` — this page never resumes on its own; the user picks Resume or
+// Discard (or heals) from the interrupted-send box.
 export async function send(wallet, transport, to, amountAtoms, reference, params, onStep) {
   return await sendInner(wallet, transport, to, amountAtoms, reference, params, onStep);
 }
@@ -135,16 +176,44 @@ export async function sendWithScarPasscode(wallet, transport, params, passcode, 
 // The ONE send tail — fund → stash → commit → history. `send()` and
 // `sendWithScarPasscode()` differ only in the params they hand the SDK, never
 // in what they do with the outcome (no forked commit logic).
+// KI#400 — a send round ended by a partial-commit VERDICT carries its report
+// (`verdictReportCbor`): commit THE wallet transition native send applies (poisoned
+// committers / garbage tip) BEFORE the error reaches the UI, then rethrow it unchanged.
+function commitVerdictThenThrow(wallet, e) {
+  try { if (e && e.verdictReportCbor) e.verdictCommitted = wallet.commitSendVerdict(e.verdictReportCbor); }
+  catch (ce) { console.warn('[send] commitSendVerdict failed:', ce); }
+  throw e;
+}
+
+// YPX-022 / YPX-026: retain the COMPLETED send (after commitSend — the proof strips the
+// receipt the commit stored): its per-txid Send Proof keeps EVERY payment recallable
+// (`recall(..., {recallTxidHex})`) and its Tribunal terms readable. Only a completed send is
+// recallable (a sub-quorum send is a no-op under the quorum gate) — nothing on failure.
+function retainCompletedSend(wallet, o) {
+  try { if (o.sendTxCbor) wallet.retainSend(o.txidHex, o.sendTxCbor); }
+  catch (e) { console.warn('[send] retainSend failed — this payment cannot be recalled from here:', e); }
+}
+
 async function sendInner(wallet, transport, to, amountAtoms, reference, params, onStep) {
-  const o = await wallet.sendFund(transport, to, amountAtoms, reference, params, onStep || null);
+  let o;
+  try { o = await wallet.sendFund(transport, to, amountAtoms, reference, params, onStep || null); }
+  catch (e) { commitVerdictThenThrow(wallet, e); }
+  try { return commitSendOutcome(wallet, o, to, amountAtoms, reference); }
+  catch (e) {
+    // The validators COMMITTED this payment; only the local commit / bookkeeping failed.
+    // Tagged so no caller ever treats it as "nothing moved" (a Tribunal fee re-send would
+    // pay the PRIEST twice — review of KI#477).
+    try { e.afterCommit = true; } catch (_) {}
+    throw e;
+  }
+}
+
+function commitSendOutcome(wallet, o, to, amountAtoms, reference) {
   // YPX-021 §8.2: stash the writer's OODS reading this round surfaced so the
   // NEXT op (incl. a recovery, which REQUIRES it under Core's §8.5 gate)
   // carries it — mirror of native nabla.rs caching it from every RegisterAck.
   stashOods(wallet, o);
-  // YPX-022 (repurposed): stash the COMPLETED send's tx — the recall target.
-  // Only a completed send is recallable (a sub-quorum send is a no-op under
-  // the quorum gate), so there is nothing to stash on failure.
-  try { if (o.sendTxCbor) wallet.stashLastSendTx(o.sendTxCbor); } catch (_) {}
+  if (o.sweepRefusals && o.sweepRefusals.length) console.warn('[send] resume sweep refused late replies (KI#355):', o.sweepRefusals);
   wallet.commitSend(
     hexToBytes(o.producedStateIdHex),
     o.newBalance,    // BigInt
@@ -152,6 +221,7 @@ async function sendInner(wallet, transport, to, amountAtoms, reference, params, 
     o.receiptCbor,
     o.factChainCbor,
   );
+  retainCompletedSend(wallet, o);
   recordHistory(wallet, o.txidHex, 'Send', amountAtoms, to, reference);
   return {
     txid: o.txidHex,
@@ -159,6 +229,48 @@ async function sendInner(wallet, transport, to, amountAtoms, reference, params, 
     registered: o.registered,
     balance: wallet.balance, // now debited
   };
+}
+
+// YPX-026 Tribunal — Alice's CONDITIONAL payment, the browser's two-phase twin of native
+// `send_tribunal`: `terms` = `tribunalTerms(...)` (checked by the SDK; TribunalInvalid sends
+// nothing). The escrow first (an error is thrown, no fee sent), then one fee per PRIEST
+// (`fees[i]` atoms, fee terms + `tribunalRefHex` = the escrow txid), each with its own result —
+// never re-run here (the app decides). A fee refused before anything moved is RECORDED by the
+// SDK (`recordUnsentTribunalFee`, THE rule decides; a saved round never is) so "Send fee"
+// survives a reload. Every leg is retained (Recall reads it by txid).
+export async function sendTribunal(wallet, transport, to, amountAtoms, reference, terms, params, onStep) {
+  const escrow = await sendInner(wallet, transport, to, amountAtoms, reference,
+    Object.assign({}, params, { tribunalHex: terms.termsHex }), onStep);
+  const fees = [];
+  for (let i = 0; i < terms.priests.length; i++) {
+    const priest = terms.priests[i], fee = BigInt(terms.fees[i]);
+    try {
+      const r = await sendInner(wallet, transport, priest, fee, 'tribunal-fee',
+        Object.assign({}, params, { tribunalHex: terms.feeTermsHex, tribunalRefHex: escrow.txid }), onStep);
+      fees.push({ priest, txid: r.txid, error: null, unsent: false });
+    } catch (e) {
+      // Never a fee that COMMITTED (`afterCommit`); otherwise THE SDK rule decides (a saved
+      // round, a scar pause or a code-less error is never "unsent").
+      let unsent = false;
+      if (!e?.afterCommit) {
+        try { unsent = wallet.recordUnsentTribunalFee(escrow.txid, priest, fee, String(e?.code || ''),
+          String(e?.recovery || ''), String(e?.message || e)); } catch (_) {}
+      }
+      fees.push({ priest, txid: null, error: e, unsent });
+    }
+  }
+  return { escrow, fees };
+}
+
+// YPX-026 — RE-SEND one PRIEST fee the Tribunal sequence did not send (`tribunalUnsentFees`):
+// the fee terms + amount come from the SDK (the retained escrow + the recorded row), never
+// from page memory; the row is cleared once the fee commits.
+export async function sendUnsentTribunalFee(wallet, transport, escrowTxidHex, priest, params, onStep) {
+  const f = wallet.unsentTribunalFeeSend(escrowTxidHex, priest);
+  const r = await sendInner(wallet, transport, priest, BigInt(f.fee), 'tribunal-fee',
+    Object.assign({}, params, { tribunalHex: f.feeTermsHex, tribunalRefHex: escrowTxidHex }), onStep);
+  try { wallet.clearUnsentTribunalFee(escrowTxidHex, priest); } catch (_) {}
+  return r;
 }
 
 // Resumable rounds (2026-07-08) — RESUME an interrupted send. Witnessing has
@@ -174,9 +286,11 @@ export async function resumeSend(wallet, transport, params, onStep) {
   // completion, and we want its to/amount for the History row.
   let desc = null;
   try { desc = wallet.resumableSend(); } catch (_) {}
-  const o = await wallet.resumeSend(transport, params, onStep || null);
+  let o;
+  try { o = await wallet.resumeSend(transport, params, onStep || null); }
+  catch (e) { commitVerdictThenThrow(wallet, e); }   // KI#400
   stashOods(wallet, o);
-  try { if (o.sendTxCbor) wallet.stashLastSendTx(o.sendTxCbor); } catch (_) {}
+  if (o.sweepRefusals && o.sweepRefusals.length) console.warn('[send] resume sweep refused late replies (KI#355):', o.sweepRefusals);
   wallet.commitSend(
     hexToBytes(o.producedStateIdHex),
     o.newBalance,    // BigInt
@@ -184,6 +298,7 @@ export async function resumeSend(wallet, transport, params, onStep) {
     o.receiptCbor,
     o.factChainCbor,
   );
+  retainCompletedSend(wallet, o);
   recordHistory(wallet, o.txidHex, 'Send',
     desc ? desc.amount : 0n, desc ? desc.to : '', 'resume');
   return {
@@ -219,14 +334,29 @@ export async function halReanchor(wallet, transport, params, onStep) {
   return await healLike(wallet, 'halReanchorFund', 'HalReanchor', 'hal-reanchor', transport, params, onStep);
 }
 
+// KI#216 INITIAL-ANCHOR — the wallet makes its OWN first, key-anchored state
+// before it ever receives (docs/AXIOM_DESIGN_FirstAnchor.md). The WASM SDK runs
+// it (initialAnchorFund = the heal machine from the empty state: amount 0,
+// seq 0→1, no fee); this page only relays — initialAnchorFund → commitHeal
+// (clearClara=false, hibernationUntil=0). The SDK refuses a wallet with any
+// history (E_WALLET_ALREADY_ANCHORED). User-initiated only — the page OFFERS it.
+export async function initialAnchor(wallet, transport, params, onStep) {
+  return await healLike(wallet, 'initialAnchorFund', 'Heal', 'initial-anchor', transport, params, onStep);
+}
+
 // YPX-020 §2 HAL — COMPLETE recovery by REDEEMING the re-anchor's distress
 // (dust self-) cheque. There is no halCompleteFund / separate completion
 // self-send anymore: the redeem IS the completion. Core's CL5 zeroes
-// hibernation_until in the witnessed receipt; commitRedeem doesn't touch the
-// local flag, so we mirror the clear via wallet.clearHibernation(). The distress
-// cheque lands in the inbox via the receive pump the caller runs — poll recv
-// until it's ready, then redeem it (records ONE dust Redeem row, not a
-// "HAL complete" row).
+// hibernation_until in the witnessed receipt of a SELF-redeem, and commitRedeem
+// applies exactly what Core produced (KI#398: the SDK's `redeem_produced_terms`).
+// ~~"commitRedeem doesn't touch the local flag, so we mirror the clear via
+// wallet.clearHibernation()"~~ and ~~"fall back to any ready bundle if the address
+// compare is finicky"~~ — both REMOVED 2026-10-24 (KI#398): the fallback could
+// redeem a STRANGER's cheque as the "completion", and the unconditional clear then
+// wrote hibernation 0 onto a state Core witnessed as still hibernating
+// (E_STATE_NOT_ANCHORED on the next send). The distress cheque lands in the inbox
+// via the receive pump the caller runs — poll recv until a ready SELF-cheque is
+// there, then redeem it (records ONE dust Redeem row, not a "HAL complete" row).
 export async function halComplete(wallet, transport, params, onStep) {
   const maildir = (params.inboxNew || '').replace(/\/inbox\/new$/, '');
   const ownAddr = wallet.info().address;
@@ -235,19 +365,17 @@ export async function halComplete(wallet, transport, params, onStep) {
   for (let i = 0; i < rounds && !chequeId; i++) {
     if (onStep) onStep('recv');
     const cheques = wallet.recv(maildir) || [];
-    // The distress cheque is a ready SELF-cheque (sender == this wallet);
-    // fall back to any ready bundle if the address compare is finicky.
-    const distress = cheques.find(c => c.ready && c.sender === ownAddr)
-                  || cheques.find(c => c.ready);
+    // The distress cheque is a ready SELF-cheque (sender == this wallet) — only that.
+    const distress = cheques.find(c => c.ready && c.sender === ownAddr);
     if (distress) { chequeId = distress.chequeId; break; }
     await sleep(params.pollIntervalMs || 250);
   }
   if (!chequeId) {
-    throw new Error('Finish recovery: no distress cheque ready yet — re-anchor first, then wait for its dust cheque to arrive.');
+    throw new Error('Finish recovery: no distress SELF-cheque ready yet — re-anchor first, then wait for its dust cheque to arrive.');
   }
   const r = await redeem(wallet, transport, chequeId, params, onStep);
-  wallet.clearHibernation();   // §2: mirror CL5's hibernation clear locally
-  return { ...r, chequeId, hibernationUntil: 0 };
+  // The wallet holds what Core produced (commitRedeem); report it, never assume 0.
+  return { ...r, chequeId, hibernationUntil: wallet.hibernationUntil };
 }
 
 // YPX-022 RECALL (repurposed 2026-07-07) — retract a COMPLETED but
@@ -273,6 +401,7 @@ export async function recall(wallet, transport, params, onStep) {
     hexToBytes(o.recalledStateIdHex),
     o.recallAmount,
     o.recallTick,
+    o.recallBondsCbor,  // YP §26.17.6.6 E2 — the notes' signers' bonds, kept for the chain
   );
   recordHistory(wallet, o.txidHex, 'Recall', 0n, '', 'recall');
   return {
@@ -287,8 +416,9 @@ export async function recall(wallet, transport, params, onStep) {
 }
 
 // YPX-022 completion — the same shape as halComplete (§2: the redeem IS the
-// completion): redeem the recall self-cheque, mirror CL5's hibernation clear
-// locally, and fill recall_cheque_id on the wallet's recall record.
+// completion): redeem the recall self-cheque (commitRedeem applies Core's produced
+// hibernation — KI#398, ~~mirror CL5's hibernation clear locally~~), and fill
+// recall_cheque_id on the wallet's recall record.
 export async function recallComplete(wallet, transport, params, onStep) {
   const r = await halComplete(wallet, transport, params, onStep);
   try {

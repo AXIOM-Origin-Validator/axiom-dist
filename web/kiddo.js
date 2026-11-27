@@ -18,6 +18,8 @@
 // is a faithful port of the Swift reference, to validate in a browser against
 // a running dev env + TOT built with --features dev-fatmama.
 
+import { totWsUrl } from './transport.js';
+
 const CRLF = '\r\n';
 const enc = s => new TextEncoder().encode(s);
 const asAscii = u8 => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return s; };
@@ -32,29 +34,16 @@ function indexOfSeq(buf, seq, from = 0) {
 const CRLF_B = enc(CRLF);
 const DOT_TERM = enc(CRLF + '.' + CRLF); // multiline terminator
 
-// Mixed-content TLS gateway upgrade for the /fatmama receive tunnel — mirror of
-// transport.js gwWs. An https-hosted page (GitHub Pages, the only way phone users
-// reach the wallet) cannot open insecure ws://, so route through the env's Caddy
-// front proxy: ws://HOST:PORT/REST -> wss://HOST/tot/PORT/REST. Without this the
-// SEND path (intake/nabla) upgraded but the RECEIVE poll (/fatmama) stayed raw
-// ws:// and was browser-blocked → genesis "hop 0 timed out after N poll rounds".
-// On file:// / http://localhost the URL is returned unchanged.
-const TLS_GATEWAY = (typeof location !== 'undefined' && location.protocol === 'https:');
-function gwWs(wsUrl) {
-  if (!TLS_GATEWAY || !wsUrl) return wsUrl;
-  try {
-    const u = new URL(wsUrl);
-    if (u.protocol !== 'ws:') return wsUrl;            // already wss:// — leave it
-    return `wss://${u.hostname}/tot/${u.port || '80'}${u.pathname}${u.search}`;
-  } catch (_) { return wsUrl; }
-}
+// Every TOT URL goes through transport.js `totWsUrl` (YPX-027 §8): the
+// /fatmama receive tunnel is a TOT WebSocket like intake/nabla, so a remote
+// host is reached as wss://HOST/tot/PORT/REST through the TLS front proxy.
 
 // A byte-stream session over the /fatmama tunnel WebSocket. Buffers inbound
 // bytes; exposes readLine (CRLF), readMultiline (… CRLF.CRLF), and send.
 function openSession(wsUrl, { connectTimeoutMs = 8000, ioTimeoutMs = 30000 } = {}) {
   return new Promise((resolve, reject) => {
     let ws;
-    try { ws = new WebSocket(gwWs(wsUrl)); } catch (e) { reject(e); return; }
+    try { ws = new WebSocket(totWsUrl(wsUrl)); } catch (e) { reject(e); return; }
     ws.binaryType = 'arraybuffer';
     let buf = new Uint8Array(0);
     let waiter = null; // { need: (buf)=>idx|-1, resolve, reject, timer }

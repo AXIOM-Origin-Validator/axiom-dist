@@ -1,28 +1,29 @@
 // AXIOM browser transport — the one capability the WASM SDK reaches the
-// network through, and it ONLY ever talks to TOT (docs/AXIOM_DESIGN_TOT.md,
-// docs/AXIOM_DESIGN_WasmClient.md §3). No raw TCP, no SMTP.
+// network through, and it ONLY ever talks to TOT (docs/AXIOM_YPX-027_TOT.md,
+// docs/archive/AXIOM_DESIGN_WasmClient.md §3). No raw TCP, no SMTP.
 //
 // Shape consumed by axiom-sdk-wasm's JsAsyncTransport:
-//   async httpRequest(address, method, path, body) -> Uint8Array
 //   async nablaTcp(address, payload)               -> Uint8Array
 //   async deliver(validatorEmail, payload)         -> void
 //
 // `makeTotTransport(config)` builds it from a resolver config:
 //   {
-//     // map a validator's delivery email -> its TOT /intake ws:// URL
-//     intakeWsFor(validatorEmail) -> "ws://host:port/intake",
+//     // map a validator's delivery email -> its TOT /intake URL; every URL
+//     // below is passed through totWsUrl (wss://host/tot/port/… for a
+//     // remote host, ws:// only for a loopback one — YPX-027 §8)
+//     intakeWsFor(validatorEmail) -> "wss://host/tot/port/intake",
 //     // NORMAL (real-email) wallets only — the held reply leg. When BOTH this
 //     // and `session` are supplied, deliver() uses /session and the replies
 //     // come back on the same socket (see session.js). Absent => /intake
 //     // fire-and-forget, and something else must fill the inbox (dev: kiddo).
-//     sessionWsFor(validatorEmail) -> "ws://host:port/session",
+//     sessionWsFor(validatorEmail) -> "wss://host/tot/port/session",
 //     session: makeSessionPool({ storage, walletDir }),
-//     // map a Nabla TCP "host:port" -> a TOT /nabla/<n> ws:// tunnel URL
-//     nablaWsFor(nablaAddress)     -> "ws://host:port/nabla/0",
-//     // optional: map a Nabla "host:port" -> "http://host:port" for the
-//     // few HTTP-only dashboard reads (not used on the protocol path)
-//     httpBaseFor(nablaAddress)    -> "http://host:port",
+//     // map a Nabla TCP "host:port" -> a TOT /nabla/<n> tunnel URL
+//     nablaWsFor(nablaAddress)     -> "wss://host/tot/port/nabla/0",
 //   }
+//
+// There is no HTTP leg to Nabla: Nabla refuses functional HTTP, so every
+// Nabla request is a TCP-CBOR frame carried through TOT's /nabla/<n> tunnel.
 
 const CONNECT_TIMEOUT_MS = 8000;
 const RESPONSE_TIMEOUT_MS = 30000;
@@ -60,7 +61,7 @@ function concat(a, b) {
 }
 
 
-// Open a ws://, send the binary `frame`, and resolve once a full
+// Open the TOT WebSocket, send the binary `frame`, and resolve once a full
 // [4-byte BE length][body] response has been reassembled (the Nabla TCP
 // wire, relayed verbatim through TOT's /nabla tunnel). `expectResponse`
 // = false for /intake (fire-and-forget, no reply).
@@ -142,18 +143,6 @@ export function makeTotTransport(config) {
       await wsRoundtrip(url, email, false);
     },
 
-    // HTTP — only for non-protocol dashboard reads. The protocol Nabla
-    // path is nablaTcp (TCP via the tunnel). Kept for completeness.
-    async httpRequest(address, method, path, body) {
-      if (typeof config.httpBaseFor !== 'function') throw new Error('httpRequest: config.httpBaseFor not configured');
-      const base = config.httpBaseFor(address);
-      if (!base) throw new Error(`no http base for ${address}`);
-      const init = { method };
-      if (body && body.length) init.body = body;
-      const resp = await fetch(base + path, init);
-      const buf = await resp.arrayBuffer();
-      return new Uint8Array(buf);
-    },
   };
   // CL1/CL5 worker offload — only present when a worker is wired (HTTP build).
   // Absent → the SDK driver runs signing in-process (single-file / no worker).
@@ -168,56 +157,55 @@ export function makeTotTransport(config) {
 // carriers in validators.list / VSP discovery — see
 // CachedHint::tot_endpoint in sdk-core.
 //
-//   validators: [{ email, totWs }]   totWs = "ws://host:port"
+//   validators: [{ email, totWs }]   totWs = "ws://host:port" (the TOT's address;
+//                                     totWsUrl maps it to the proxy form)
 //   nablas:     ["host:port", ...]    (the attested order; index = /nabla/<i>)
 //   nablaTotWs: "ws://host:port"      the TOT that tunnels to those nablas
-// Mixed-content TLS gateway upgrade.
+// THE TOT URL rule (AXIOM_YPX-027_TOT.md §8) — the ONE function every TOT
+// WebSocket URL in the webclient goes through (transport.js, kiddo.js,
+// session.js via totConfigFrom, index.html).
 //
-// Browsers forbid an HTTPS page (e.g. the hosted webclient on GitHub Pages,
-// the only way phone users reach it) from opening insecure ws:// / http://
-// to the env — so every connection is blocked with "TOT ws error … hop 0".
-// When (and ONLY when) we're served over https, route through the env's TLS
-// gateway (Caddy on <host>:443) which terminates TLS and path-proxies back to
-// the plaintext TOT / Nabla ports:
-//   ws://HOST:PORT/REST   -> wss://HOST/tot/PORT/REST   (protocol path)
-//   http://HOST:PORT/REST -> https://HOST/nh/PORT/REST  (dashboard reads only)
-// On file:// or http://localhost the originals are returned unchanged, so the
-// single-file build and local hosting keep working against a plaintext env.
-const TLS_GATEWAY = (typeof location !== 'undefined' && location.protocol === 'https:');
-
-function gwWs(wsUrl) {
-  if (!TLS_GATEWAY || !wsUrl) return wsUrl;
-  try {
-    const u = new URL(wsUrl);
-    if (u.protocol !== 'ws:') return wsUrl;            // already wss:// — leave it
-    return `wss://${u.hostname}/tot/${u.port || '80'}${u.pathname}${u.search}`;
-  } catch (_) { return wsUrl; }
+// A browser reaches TOT ONLY over wss:// through the validator host's TLS front
+// proxy; TOT itself refuses a WebSocket from any non-loopback peer. So:
+//   ws://HOST:PORT/REST  ->  wss://HOST/tot/PORT/REST   for every REMOTE host,
+//                                                        whatever the page origin;
+//   ws://HOST:PORT/REST  unchanged                       ONLY when HOST is loopback
+//                                                        (localhost, 127.0.0.0/8, ::1)
+//                                                        — local dev on the TOT's machine.
+// A URL that is already wss:// is returned unchanged. A ws:// URL with no port
+// means the first TOT port (7400, deploy/topology.toml `tot`), never 80 — no
+// TOT listens on 80.
+const TOT_DEFAULT_PORT = '7400';
+function isLoopbackHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return h === 'localhost' || h === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
 }
-
-function gwHttpBase(addr) {
-  if (!TLS_GATEWAY) return `http://${addr}`;
-  const [host, port] = addr.split(':');
-  return `https://${host}/nh/${port || '80'}`;
+export function totWsUrl(wsUrl) {
+  if (!wsUrl) return wsUrl;
+  let u;
+  try { u = new URL(wsUrl); } catch (_) { return wsUrl; }
+  if (u.protocol !== 'ws:') return wsUrl;              // already wss:// — leave it
+  if (isLoopbackHost(u.hostname)) return wsUrl;        // local dev, same machine
+  return `wss://${u.hostname}/tot/${u.port || TOT_DEFAULT_PORT}${u.pathname}${u.search}`;
 }
 
 export function totConfigFrom({ validators, nablas, nablaTotWs, fromEmail, messageType, cl1, cl5, session }) {
   const intake = new Map(validators.map(v => [v.email, `${v.totWs}/intake`]));
   // The held reply leg. Same host/port as /intake — one TOT per validator, two
-  // routes on it (AXIOM_DESIGN_TOT.md §5.4).
+  // routes on it (AXIOM_YPX-027_TOT.md §5.4).
   const sessionUrls = new Map(validators.map(v => [v.email, `${v.totWs}/session`]));
   const nablaIdx = new Map((nablas || []).map((addr, i) => [addr, i]));
   return {
-    intakeWsFor: (email) => gwWs(intake.get(email)),
-    sessionWsFor: (email) => gwWs(sessionUrls.get(email)),
+    intakeWsFor: (email) => totWsUrl(intake.get(email)),
+    sessionWsFor: (email) => totWsUrl(sessionUrls.get(email)),
     // Present ONLY for a normal (real-email) wallet — index.html supplies the
     // pool from the wallet's class, never from a preference. Absent => the
     // dev /intake + FATMAMA-drain path.
     session,
     nablaWsFor: (addr) => {
       const i = nablaIdx.get(addr);
-      return i === undefined ? undefined : gwWs(`${nablaTotWs}/nabla/${i}`);
+      return i === undefined ? undefined : totWsUrl(`${nablaTotWs}/nabla/${i}`);
     },
-    httpBaseFor: (addr) => gwHttpBase(addr),
     // Carrier email-wrap context (deliver → ANTIE).
     fromEmail,                          // routes ANTIE's response back
     messageType: messageType || 'witness', // ANTIE dispatch (witness/redeem)
